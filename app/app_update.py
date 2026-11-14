@@ -112,6 +112,44 @@ def latest() -> dict | None:
             "page": rel.get("html_url", "")}
 
 
+def history(newer_than: str | None = None, upto: str | None = None) -> list[dict]:
+    """릴리스 내역 [{version, title, date, notes}] 최신 순. 시험판 · 초안은 뺌.
+    newer_than 을 주면 그보다 높은 버전만 (예: 지금 1.0.0, 최신 1.0.3 → 1.0.3 · 1.0.2 · 1.0.1)."""
+    test = os.environ.get("EXILEDELTA_UPDATE_MANIFEST")
+    if test:
+        m = json.loads(Path(test).read_text(encoding="utf-8"))
+        rels = m.get("history") or [{"version": m["version"], "title": f"v{m['version']}", "date": "",
+                                      "notes": m.get("notes", "")}]
+    else:
+        r = requests.get(f"https://api.github.com/repos/{REPO}/releases?per_page=50", headers=UA, timeout=15)
+        r.raise_for_status()
+        rels = [{"version": x["tag_name"].lstrip("v"), "title": x.get("name") or x["tag_name"],
+                 "date": (x.get("published_at") or "")[:10], "notes": x.get("body") or ""}
+                for x in r.json() if not x.get("draft") and not x.get("prerelease")]
+    out = [x for x in rels
+           if (newer_than is None or vt(x["version"]) > vt(newer_than)) and (upto is None or vt(x["version"]) <= vt(upto))]
+    return sorted(out, key=lambda x: vt(x["version"]), reverse=True)
+
+
+def history_markdown(rels: list[dict], current: str | None = None) -> str:
+    """내역 → 화면용 마크다운. 릴리스 글의 '설치' 안내처럼 업데이트와 상관없는 부분은 줄임."""
+    import re
+
+    parts = []
+    for x in rels:
+        body = (x.get("notes") or "").strip()
+        body = re.sub(r"(?ms)^#+\s*설치.*?(?=^#+\s|\Z)", "", body)  # '### 설치' 절은 빼기
+        body = re.sub(r"(?m)^`app-.*manifest\.json`.*$", "", body)  # 업데이트용 파일 안내 줄
+        body = re.sub(r"(?m)^\*이 프로그램은 Grinding Gear Games.*$", "", body)
+        body = re.sub(r"(?m)^#{1,2}\s+.*$", "", body, count=1)  # 맨 위 제목은 아래 머리로 대신
+        body = re.sub(r"(?m)^#+\s*(이번 버전|변경 내용|바뀐 점)\s*$", "", body)  # 버전마다 반복되는 소제목
+        body = re.sub(r"\n{3,}", "\n\n", body).strip()
+        mark = "  ← 지금 버전" if current and x["version"] == current else ""
+        date = f" · {x['date']}" if x.get("date") else ""
+        parts.append(f"## v{x['version']}{date}{mark}\n\n{body or '(내용 없음)'}")
+    return "\n\n---\n\n".join(parts)
+
+
 def decide(info: dict | None) -> str:
     """'none'(최신) / 'bad'(실패했던 버전) / 'exe'(새 exe 필요) / 'update'."""
     if not info or vt(info["version"]) <= vt(VERSION):
@@ -212,7 +250,16 @@ class StartupUpdater:
             if self.manual:
                 self._info("프로그램 업데이트", "개발 모드로 실행 중이라 업데이트를 확인하지 않습니다.")
             return self.after()
-        run_async(latest, self._got, self._fail)
+        def job():
+            inf = latest()
+            if inf and vt(inf["version"]) > vt(VERSION):
+                try:  # 지금 버전 다음부터 최신까지 모든 버전의 내역
+                    inf["history"] = history(VERSION, inf["version"])
+                except Exception:  # noqa: BLE001 - 내역을 못 받아도 업데이트는 가능
+                    inf["history"] = []
+            return inf
+
+        run_async(job, self._got, self._fail)
 
     def _info(self, title: str, text: str) -> None:
         from dialogs import info
@@ -257,27 +304,19 @@ class StartupUpdater:
         return self._done()
 
     def _ask(self, inf: dict) -> bool:
-        from PySide6.QtWidgets import QMessageBox
-
-        notes = (inf.get("notes") or "").strip()
-        if len(notes) > 1500:
-            notes = notes[:1500] + "…"
-        box = QMessageBox(self.win)
-        box.setWindowTitle("프로그램 업데이트")
-        box.setText(f"새 버전이 있습니다: v{VERSION} → v{inf['version']}\n지금 업데이트할까요? (몇 초면 끝나고 다시 시작합니다)")
-        if notes:
-            box.setInformativeText(notes)
-        yes = box.addButton("지금 업데이트", QMessageBox.ButtonRole.AcceptRole)
-        box.addButton("나중에", QMessageBox.ButtonRole.RejectRole)
-        skip = box.addButton("이 버전 건너뛰기", QMessageBox.ButtonRole.DestructiveRole)
-        box.exec()
-        if box.clickedButton() is skip:
+        rels = inf.get("history") or [{"version": inf["version"], "date": "", "notes": inf.get("notes", "")}]
+        dlg = HistoryDialog(self.win, "프로그램 업데이트",
+                            f"새 버전이 있습니다: <b>v{VERSION} → v{inf['version']}</b>"
+                            + (f" &nbsp;<span style='color:#968b7a'>({len(rels)}개 버전의 변경 내용)</span>" if len(rels) > 1 else ""),
+                            history_markdown(rels), update=True)
+        dlg.exec()
+        if dlg.choice == "skip":
             from storage import load_settings, save_settings
 
             s = load_settings()
             s["app_update_skip"] = inf["version"]
             save_settings(s)
-        return box.clickedButton() is yes
+        return dlg.choice == "update"
 
     def _install(self, inf: dict) -> None:
         from PySide6.QtCore import Qt
@@ -327,3 +366,91 @@ class StartupUpdater:
             s["app_update_seen"] = True
             save_settings(s)
         self.after()
+
+
+# ---------------------------------------------------------------- 업데이트 내역 창
+def _dialog_base():
+    from dialogs import FramelessDialog
+
+    return FramelessDialog
+
+
+class HistoryDialog(_dialog_base()):
+    """버전별 변경 내용. update=True 면 [지금 업데이트] [나중에] [이 버전 건너뛰기], 아니면 [닫기]."""
+
+    def __init__(self, parent, title: str, head_html: str, markdown: str, update: bool = False):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTextBrowser, QVBoxLayout
+
+        self.choice = "later"
+        self.setMinimumSize(560, 460)
+        v = QVBoxLayout(self.frame)
+        v.setContentsMargins(22, 18, 22, 16)
+        v.setSpacing(10)
+        t = QLabel(title)
+        t.setObjectName("DialogTitle")
+        v.addWidget(t)
+        h = QLabel(head_html)
+        h.setObjectName("DialogText")
+        h.setWordWrap(True)
+        v.addWidget(h)
+        body = QTextBrowser()
+        body.setOpenExternalLinks(True)
+        body.setMarkdown(markdown or "(변경 내용 없음)")
+        body.setStyleSheet("QTextBrowser { background: #100e0b; border: 1px solid #3a3226; border-radius: 6px;"
+                           " padding: 8px; color: #e6dcc8; font-size: 10.5pt; }")
+        v.addWidget(body, 1)
+        row = QHBoxLayout()
+        if update:
+            note = QLabel("몇 초 뒤 다시 시작")
+            note.setStyleSheet("color: #968b7a; font-size: 9.5pt;")
+            row.addWidget(note)
+        row.addStretch(1)
+
+        def pick(c):
+            self.choice = c
+            self.accept() if c == "update" else self.reject()
+
+        if update:
+            skip = QPushButton("이 버전 건너뛰기")
+            skip.clicked.connect(lambda: pick("skip"))
+            row.addWidget(skip)
+            later = QPushButton("나중에")
+            later.clicked.connect(lambda: pick("later"))
+            row.addWidget(later)
+            ok = QPushButton("지금 업데이트")
+            ok.setObjectName("Primary")
+            ok.setDefault(True)
+            ok.clicked.connect(lambda: pick("update"))
+            row.addWidget(ok)
+        else:
+            close = QPushButton("닫기")
+            close.setObjectName("Primary")
+            close.setDefault(True)
+            close.clicked.connect(self.accept)
+            row.addWidget(close)
+        v.addLayout(row)
+
+
+def show_history(win) -> None:
+    """메뉴 · 상태 표시줄 버전 클릭: 지금까지의 모든 릴리스 내역."""
+    from asyncjob import run_async
+
+    def got(rels):
+        if not rels:
+            from dialogs import info
+
+            info(win, "업데이트 내역", "아직 올라온 릴리스가 없습니다.")
+            return
+        newest = rels[0]["version"]
+        head = (f"지금 버전 <b>v{VERSION}</b> · 최신 <b>v{newest}</b>"
+                + (" &nbsp;<span style='color:#7fc46a'>최신 버전입니다</span>" if vt(newest) <= vt(VERSION)
+                   else " &nbsp;<span style='color:#e8c15a'>메뉴 → 프로그램 업데이트 확인으로 받을 수 있습니다</span>"))
+        HistoryDialog(win, "업데이트 내역", head, history_markdown(rels, VERSION)).exec()
+
+    def fail(msg):
+        from dialogs import info
+
+        info(win, "업데이트 내역", f"GitHub 에서 내역을 받지 못했습니다.\n{msg}")
+
+    win._history_job = run_async(lambda: history(), got, fail)

@@ -80,8 +80,17 @@ def main() -> int:
             self.engine_label.setObjectName("StatusText")
             right = QLabel(f"옵션 데이터 {db.built}  ·  {db.total:,}개")
             right.setObjectName("StatusText")
+            from version import VERSION as _ver
+
+            self.app_label = QLabel(f"{APP_NAME} v{_ver}")
+            self.app_label.setObjectName("StatusText")
+            self.app_label.setToolTip("프로그램 버전 · 누르면 업데이트 내역")
+            self.app_label.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.app_label.mousePressEvent = lambda e: self._show_history()
             sh.addWidget(self.status_left)
             sh.addStretch(1)
+            sh.addWidget(self.app_label)
+            sh.addSpacing(16)
             sh.addWidget(self.engine_label)
             sh.addSpacing(16)
             sh.addWidget(right)
@@ -178,6 +187,10 @@ def main() -> int:
             from version import VERSION
 
             self.menu.addAction(f"프로그램 업데이트 확인 (지금 v{VERSION})", self._check_app_update)
+            self.menu.addAction("업데이트 내역 보기", self._show_history)
+
+        def _show_history(self) -> None:
+            self._app_update.show_history(self)
 
         def _check_app_update(self) -> None:
             self._app_up_manual = self._app_update.StartupUpdater(self, lambda: None, manual=True)
