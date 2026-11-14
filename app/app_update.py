@@ -140,7 +140,7 @@ def history_markdown(rels: list[dict], current: str | None = None) -> str:
         body = (x.get("notes") or "").strip()
         body = re.sub(r"(?ms)^#+\s*설치.*?(?=^#+\s|\Z)", "", body)  # '### 설치' 절은 빼기
         body = re.sub(r"(?m)^`app-.*manifest\.json`.*$", "", body)  # 업데이트용 파일 안내 줄
-        body = re.sub(r"(?m)^\*이 프로그램은 Grinding Gear Games.*$", "", body)
+        body = re.sub(r"(?m)^\*.*Grinding Gear Games.*$", "", body)  # 고지 문구 줄
         body = re.sub(r"(?m)^#{1,2}\s+.*$", "", body, count=1)  # 맨 위 제목은 아래 머리로 대신
         body = re.sub(r"(?m)^#+\s*(이번 버전|변경 내용|바뀐 점)\s*$", "", body)  # 버전마다 반복되는 소제목
         body = re.sub(r"\n{3,}", "\n\n", body).strip()
