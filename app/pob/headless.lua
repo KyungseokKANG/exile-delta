@@ -1728,6 +1728,15 @@ function es_compare_item(itemText)
 		end
 	end
 	if item.clusterJewel then res.note = "cluster" end
+	-- 슬롯 순서 고정 (pairs 순서는 매번 달라서 무기 2 가 먼저 나오기도 함): 무기 1 → 무기 2 → … → 반지 1 → 반지 2 …
+	local order = { ["Weapon 1"] = 1, ["Weapon 2"] = 2, ["Weapon 1 Swap"] = 3, ["Weapon 2 Swap"] = 4, ["Helmet"] = 5,
+		["Body Armour"] = 6, ["Gloves"] = 7, ["Boots"] = 8, ["Amulet"] = 9, ["Ring 1"] = 10, ["Ring 2"] = 11,
+		["Ring 3"] = 12, ["Belt"] = 13 }
+	table.sort(res.slots, function(a, b)
+		local ra, rb = order[a.slot] or 100 + (a.jewel or 0), order[b.slot] or 100 + (b.jewel or 0)
+		if ra ~= rb then return ra < rb end
+		return tostring(a.slot) < tostring(b.slot)
+	end)
 	return res
 end
 
