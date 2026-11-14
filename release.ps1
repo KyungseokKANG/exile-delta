@@ -33,6 +33,7 @@ foreach ($f in @($exe, $app, $man)) { if (-not (Test-Path $f)) { throw "missing 
 if (Test-Path $full) { Remove-Item $full -Force }
 Compress-Archive -Path $exe -DestinationPath $full
 
+gh auth setup-git  # git push uses the gh login
 git add -A
 $changes = git status --porcelain
 if ($changes) { git commit -q -m "Release $tag" }
