@@ -1,0 +1,329 @@
+"""프로그램(앱 코드) 자동 업데이트 — GitHub 릴리스.
+
+릴리스 (github.com/KyungseokKANG/exile-delta/releases) 에는 release.ps1 이 아래 파일을 올린다:
+  manifest.json      {"version", "zip", "sha256", "min_loader", "notes"}
+  app-<버전>.zip     앱 코드 (app/, data/) — 1~2MB
+  ExileDelta-<버전>.zip  처음 설치용 exe
+
+걸러 내는 규칙:
+  - '최신 릴리스'만 본다 (GitHub 가 시험판 Pre-release · 초안은 빼고 알려 줌)
+  - 지금 버전보다 높은 버전만 · 이 PC 에서 시작에 실패했던 버전(state.json bad)은 건너뜀
+  - min_loader 가 지금 exe 보다 높으면 코드만으로는 안 됨 → 새 exe 를 받으라고 안내
+  - 받은 zip 은 SHA-256 이 manifest 와 같아야 설치
+설치: %LOCALAPPDATA%\\ExileDelta\\app\\<버전>\\ 에 풀고 state.json 의 current 를 바꾼 뒤 재시작 (실제 전환은 로더가 함).
+로더 없이(개발 모드 python app\\main.py) 실행하면 동작하지 않는다.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import sys
+import zipfile
+from pathlib import Path
+
+import requests
+
+from paths import LOCAL
+from version import VERSION
+
+REPO = "KyungseokKANG/exile-delta"
+UA = {"User-Agent": "ExileDelta-updater", "Accept": "application/vnd.github+json"}
+APPS = LOCAL / "app"
+RESTART = {"want": False}
+
+
+def enabled() -> bool:
+    return bool(os.environ.get("EXILEDELTA_LOADER"))
+
+
+def loader_version() -> int:
+    try:
+        return int(os.environ.get("EXILEDELTA_LOADER") or 0)
+    except ValueError:
+        return 0
+
+
+def vt(v: str) -> tuple:
+    try:
+        return tuple(int(x) for x in str(v).strip().lstrip("v").split("."))
+    except ValueError:
+        return (0,)
+
+
+# ---------------------------------------------------------------- 상태 (로더와 같은 파일)
+def _state() -> dict:
+    try:
+        d = json.loads((APPS / "state.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        d = {}
+    d.setdefault("bad", [])
+    d.setdefault("tries", {})
+    return d
+
+
+def _save_state(d: dict) -> None:
+    APPS.mkdir(parents=True, exist_ok=True)
+    tmp = APPS / "state.tmp"
+    tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, APPS / "state.json")
+
+
+def mark_ok() -> None:
+    """정상 시작 표시 (로더가 '고장난 버전' 판단에 씀). 창이 뜨고 잠시 뒤 호출."""
+    root = os.environ.get("EXILEDELTA_APP_ROOT")
+    if not root:
+        return
+    try:
+        p = Path(root) / ".ok"
+        if not p.exists():
+            p.write_text(VERSION, encoding="utf-8")
+        st = _state()
+        if st["tries"].pop(Path(root).name, None) is not None:
+            _save_state(st)
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------- 확인
+def latest() -> dict | None:
+    """최신 릴리스 정보 {version, zip_url, sha256, min_loader, notes, page} 또는 None (릴리스 없음).
+    시험용: 환경 변수 EXILEDELTA_UPDATE_MANIFEST 에 로컬 manifest.json 경로를 주면 그걸 씀."""
+    test = os.environ.get("EXILEDELTA_UPDATE_MANIFEST")
+    if test:
+        m = json.loads(Path(test).read_text(encoding="utf-8"))
+        z = Path(test).with_name(m["zip"])
+        return {"version": m["version"], "zip_url": z.as_uri(), "sha256": m["sha256"],
+                "min_loader": int(m.get("min_loader", 1)), "notes": m.get("notes", ""), "page": ""}
+    r = requests.get(f"https://api.github.com/repos/{REPO}/releases/latest", headers=UA, timeout=15)
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    rel = r.json()
+    assets = {a["name"]: a["browser_download_url"] for a in rel.get("assets", [])}
+    if "manifest.json" not in assets:
+        return None
+    m = requests.get(assets["manifest.json"], headers=UA, timeout=15).json()
+    if m.get("zip") not in assets:
+        return None
+    return {"version": m["version"], "zip_url": assets[m["zip"]], "sha256": m["sha256"],
+            "min_loader": int(m.get("min_loader", 1)), "notes": rel.get("body") or m.get("notes", ""),
+            "page": rel.get("html_url", "")}
+
+
+def decide(info: dict | None) -> str:
+    """'none'(최신) / 'bad'(실패했던 버전) / 'exe'(새 exe 필요) / 'update'."""
+    if not info or vt(info["version"]) <= vt(VERSION):
+        return "none"
+    if info["version"] in _state()["bad"]:
+        return "bad"
+    if info["min_loader"] > loader_version():
+        return "exe"
+    return "update"
+
+
+# ---------------------------------------------------------------- 설치
+def _download(url: str, dest: Path, progress) -> None:
+    if url.startswith("file:"):
+        from urllib.parse import unquote, urlparse
+
+        src = Path(unquote(urlparse(url).path.lstrip("/")))
+        shutil.copyfile(src, dest)
+        return
+    with requests.get(url, headers={"User-Agent": UA["User-Agent"]}, timeout=60, stream=True) as r:
+        r.raise_for_status()
+        total = int(r.headers.get("Content-Length") or 0)
+        done = 0
+        with open(dest, "wb") as f:
+            for chunk in r.iter_content(64 * 1024):
+                f.write(chunk)
+                done += len(chunk)
+                progress(done, max(total, done), f"받는 중… {done // 1024:,} KB")
+
+
+def install(info: dict, progress=lambda *a: None) -> str:
+    ver = info["version"]
+    APPS.mkdir(parents=True, exist_ok=True)
+    part = APPS / f"{ver}.zip.part"
+    _download(info["zip_url"], part, progress)
+    sha = hashlib.sha256(part.read_bytes()).hexdigest()
+    if sha.lower() != str(info["sha256"]).lower():
+        part.unlink(missing_ok=True)
+        raise RuntimeError("받은 파일이 손상되었습니다 (SHA-256 불일치). 잠시 후 다시 시도해 주세요.")
+    progress(1, 1, "설치 중…")
+    tmp = APPS / f"{ver}.tmp"
+    shutil.rmtree(tmp, ignore_errors=True)
+    with zipfile.ZipFile(part) as z:
+        for n in z.namelist():  # 폴더 밖으로 나가는 경로 거부
+            if n.startswith(("/", "\\")) or ".." in Path(n).parts:
+                raise RuntimeError(f"잘못된 파일 경로: {n}")
+        z.extractall(tmp)
+    part.unlink(missing_ok=True)
+    if not (tmp / "app" / "main.py").exists():
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise RuntimeError("업데이트 파일에 앱 코드가 없습니다.")
+    (tmp / ".complete").write_text(ver, encoding="utf-8")
+    dest = APPS / ver
+    shutil.rmtree(dest, ignore_errors=True)
+    os.replace(tmp, dest)
+    st = _state()
+    cur = st.get("current")
+    if cur and cur != ver:
+        st["previous"] = cur
+    st["current"] = ver
+    st["tries"].pop(ver, None)
+    _save_state(st)
+    # 지금 · 이전 · 실행 중 버전만 남기고 정리
+    keep = {ver, st.get("previous"), Path(os.environ.get("EXILEDELTA_APP_ROOT", "")).name}
+    for d in APPS.iterdir():
+        if d.is_dir() and d.name not in keep and (d / ".complete").exists():
+            shutil.rmtree(d, ignore_errors=True)
+    return ver
+
+
+def relaunch() -> None:
+    """app.exec() 가 끝난 뒤 main.py 가 부름: 새 프로세스로 다시 실행 (로더가 새 버전을 고름)."""
+    import subprocess
+
+    env = dict(os.environ)
+    env.pop("EXILEDELTA_APP_ROOT", None)
+    # 단일 exe(PyInstaller onefile)는 자식 프로세스가 부모의 임시 폴더를 같이 씀 → 부모가 끝나며 지우면 깨짐.
+    # 새로 실행하는 것은 완전히 별개 실행으로 (PoB 워커는 부모와 같이 쓰는 게 맞으므로 거기엔 안 씀)
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    subprocess.Popen([sys.executable] + sys.argv[1:], env=env, close_fds=True,
+                     creationflags=0x00000008 | 0x00000200)
+
+
+# ---------------------------------------------------------------- 화면
+class StartupUpdater:
+    """시작할 때 한 번: 업데이트 확인 → (처음 실행이면 바로, 아니면 물어보고) 설치 → 재시작.
+    끝나면(업데이트 없음 · 나중에 · 실패) after() 호출 — 이어서 PoB 엔진 설치 등."""
+
+    def __init__(self, win, after, manual: bool = False):
+        self.win = win
+        self.after = after
+        self.manual = manual
+
+    def start(self) -> None:
+        from asyncjob import run_async
+
+        if not enabled():
+            if self.manual:
+                self._info("프로그램 업데이트", "개발 모드로 실행 중이라 업데이트를 확인하지 않습니다.")
+            return self.after()
+        run_async(latest, self._got, self._fail)
+
+    def _info(self, title: str, text: str) -> None:
+        from dialogs import info
+
+        info(self.win, title, text)
+
+    def _fail(self, msg: str) -> None:
+        if self.manual:
+            self._info("업데이트 확인 실패", f"GitHub 에 연결하지 못했습니다.\n{msg}")
+        self.after()
+
+    def _got(self, inf) -> None:
+        from storage import load_settings, save_settings
+
+        what = decide(inf)
+        s = load_settings()
+        first = not s.get("app_update_seen")
+        if not first and not self.manual and s.get("app_update_skip") == (inf or {}).get("version"):
+            what = "none"  # '이 버전 건너뛰기'
+        if what == "none":
+            if self.manual:
+                self._info("프로그램 업데이트", f"최신 버전입니다 (v{VERSION}).")
+            return self._done()
+        if what == "bad":
+            if self.manual:
+                self._info("프로그램 업데이트", f"v{inf['version']} 은 이 PC 에서 시작에 실패해서 건너뜁니다.")
+            return self._done()
+        if what == "exe":
+            from dialogs import confirm
+
+            if confirm(self.win, "새 설치 파일 필요",
+                       f"새 버전 v{inf['version']} 은 프로그램(exe)을 새로 받아야 합니다.\n"
+                       f"다운로드 페이지를 열까요?", "페이지 열기"):
+                import webbrowser
+
+                webbrowser.open(inf.get("page") or f"https://github.com/{REPO}/releases/latest")
+            return self._done()
+        if first and not self.manual:
+            return self._install(inf)  # 처음 실행: 묻지 않고 최신으로
+        if self._ask(inf):
+            return self._install(inf)
+        return self._done()
+
+    def _ask(self, inf: dict) -> bool:
+        from PySide6.QtWidgets import QMessageBox
+
+        notes = (inf.get("notes") or "").strip()
+        if len(notes) > 1500:
+            notes = notes[:1500] + "…"
+        box = QMessageBox(self.win)
+        box.setWindowTitle("프로그램 업데이트")
+        box.setText(f"새 버전이 있습니다: v{VERSION} → v{inf['version']}\n지금 업데이트할까요? (몇 초면 끝나고 다시 시작합니다)")
+        if notes:
+            box.setInformativeText(notes)
+        yes = box.addButton("지금 업데이트", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("나중에", QMessageBox.ButtonRole.RejectRole)
+        skip = box.addButton("이 버전 건너뛰기", QMessageBox.ButtonRole.DestructiveRole)
+        box.exec()
+        if box.clickedButton() is skip:
+            from storage import load_settings, save_settings
+
+            s = load_settings()
+            s["app_update_skip"] = inf["version"]
+            save_settings(s)
+        return box.clickedButton() is yes
+
+    def _install(self, inf: dict) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QProgressDialog
+
+        from asyncjob import run_async
+
+        dlg = QProgressDialog(f"v{inf['version']} 받는 중…", "", 0, 0, self.win)
+        dlg.setWindowTitle("프로그램 업데이트")
+        dlg.setCancelButton(None)
+        dlg.setWindowModality(Qt.WindowModality.WindowModal)
+        dlg.setMinimumDuration(0)
+        dlg.show()
+
+        def prog(d, t, m):
+            dlg.setRange(0, max(1, t))
+            dlg.setValue(d)
+            dlg.setLabelText(m)
+
+        def ok(ver):
+            dlg.close()
+            from storage import load_settings, save_settings
+
+            s = load_settings()
+            s["app_update_seen"] = True
+            save_settings(s)
+            if hasattr(self.win, "flash"):
+                self.win.flash(f"v{ver} 설치 완료 — 다시 시작합니다")
+            RESTART["want"] = True
+            from PySide6.QtCore import QTimer
+            from PySide6.QtWidgets import QApplication
+
+            QTimer.singleShot(300, lambda: (self.win.close(), QApplication.instance().quit()))
+
+        def fail(msg):
+            dlg.close()
+            self._info("업데이트 실패", f"업데이트를 설치하지 못했습니다. 지금 버전으로 계속합니다.\n{msg}")
+            self._done()
+
+        run_async(lambda p: install(inf, p), ok, fail, prog, with_progress=True)
+
+    def _done(self) -> None:
+        from storage import load_settings, save_settings
+
+        s = load_settings()
+        if not s.get("app_update_seen"):
+            s["app_update_seen"] = True
+            save_settings(s)
+        self.after()

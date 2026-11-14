@@ -32,7 +32,10 @@ def resource_path(rel: str) -> Path:
         p = updated_data_dir() / Path(rel).name
         if p.exists():
             return p
-    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    # 앱 코드 폴더(app/)의 한 단계 위 = data/ 가 있는 곳 (개발 폴더 · exe 안 기본 코드 · 받은 업데이트 모두 같은 모양)
+    base = Path(__file__).resolve().parent.parent
+    if not (base / rel).exists() and hasattr(sys, "_MEIPASS"):
+        base = Path(sys._MEIPASS)  # 예전 단일 exe 구조
     return base / rel
 
 

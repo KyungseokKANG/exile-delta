@@ -50,7 +50,9 @@ def main() -> int:
             self._cursor_shape = None
 
             self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
-            self.setWindowTitle(f"{APP_NAME} — PoE 캐릭터 · 아이템 판정기")
+            from version import VERSION
+
+            self.setWindowTitle(f"{APP_NAME} v{VERSION} — PoE 장비 교체 DPS · EHP 비교")
             self.setWindowIcon(app_icon())
             self.setMinimumSize(900, 600)
 
@@ -141,6 +143,18 @@ def main() -> int:
             self.updater.message.connect(self.flash)
             self.char_page.updater = self.updater
             QTimer.singleShot(20000, self.updater.auto)
+            # 프로그램 업데이트(내 GitHub 릴리스) 확인 → 끝나면 PoB 엔진이 없을 때 자동 설치
+            import app_update
+
+            self._app_update = app_update
+            # (객체를 self 에 붙잡아 둬야 결과 신호를 받기 전에 사라지지 않음)
+            self._app_up = app_update.StartupUpdater(self, self._after_app_update)
+            QTimer.singleShot(1200, self._app_up.start)
+            QTimer.singleShot(6000, app_update.mark_ok)  # 창이 뜨고 잘 돌면 '정상 시작' 표시 (로더의 되돌리기 판단용)
+
+        def _after_app_update(self) -> None:
+            if self.client.state == "missing" and not getattr(self.char_page, "_installing", False):
+                self.char_page.install_engine()  # 처음 실행: 버튼 누를 필요 없이 바로 PoB 엔진 받기
 
         # ---------- 섹션 ----------
         def _page(self):
@@ -160,6 +174,14 @@ def main() -> int:
             act.setCheckable(True)
             act.setChecked(self.watch_clipboard)
             act.toggled.connect(self._set_watch)
+            self.menu.addSeparator()
+            from version import VERSION
+
+            self.menu.addAction(f"프로그램 업데이트 확인 (지금 v{VERSION})", self._check_app_update)
+
+        def _check_app_update(self) -> None:
+            self._app_up_manual = self._app_update.StartupUpdater(self, lambda: None, manual=True)
+            self._app_up_manual.start()
 
         def _set_watch(self, on: bool) -> None:
             self.watch_clipboard = on
@@ -385,7 +407,14 @@ def main() -> int:
     server.newConnection.connect(_activate)
 
     win.showMaximized() if win.start_max else win.show()
-    return app.exec()
+    code = app.exec()
+    import app_update
+
+    if app_update.RESTART["want"]:
+        server.close()  # 새 프로세스가 '이미 실행 중' 으로 착각하지 않게
+        win.client.stop()
+        app_update.relaunch()
+    return code
 
 
 if __name__ == "__main__":

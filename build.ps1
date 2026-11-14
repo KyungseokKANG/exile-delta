@@ -43,20 +43,22 @@ python "$root\tools\make_icon.py"
 if ($LASTEXITCODE -ne 0) { throw 'icon build failed' }
 
 Write-Host "[3/4] PyInstaller"
+# app code is NOT compiled into the exe: launcher\launcher.py runs it from files
+#   - built-in copy:  <exe>\appsrc\{app,data}   (staged below)
+#   - downloaded:     %LOCALAPPDATA%\ExileDelta\app\<ver>\   (GitHub release app-<ver>.zip)
+# dist\app-<ver>.zip + dist\manifest.json are the update payload (release.ps1 uploads them)
+$stage = Join-Path $work 'appsrc'
+python "$root\tools\pack_app.py" $stage "$root\dist"
+if ($LASTEXITCODE -ne 0) { throw 'pack_app failed' }
 python -m PyInstaller --noconfirm --onefile --windowed --log-level WARN `
     --name $name `
     --icon "$root\assets\icon.ico" `
-    --add-data "$root\data\mods_ko.json;data" `
-    --add-data "$root\data\names_ko.json;data" `
-    --add-data "$root\data\ko_en.json;data" `
-    --add-data "$root\app\pob\headless.lua;pob" `
-    --hidden-import paths `
+    --add-data "$stage;appsrc" `
     --hidden-import lupa.luajit21 `
     --exclude-module lupa.lua51 --exclude-module lupa.lua52 --exclude-module lupa.lua53 `
     --exclude-module lupa.lua54 --exclude-module lupa.luajit20 `
-    --paths "$root\app" `
     --workpath $work --specpath $work --distpath "$root\dist" `
-    "$root\app\main.py"
+    "$root\launcher\launcher.py"
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed' }
 
 if ($Zip) {

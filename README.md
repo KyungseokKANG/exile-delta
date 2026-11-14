@@ -27,14 +27,21 @@
 
 ## 설치 · 실행
 
-1. [Releases](../../releases) 에서 최신 `ExileDelta-*.zip` 을 받아 원하는 폴더에 풉니다.
+1. [Releases](../../releases/latest) 에서 `ExileDelta-<버전>.zip` 을 받아 원하는 폴더에 풉니다.
 2. `ExileDelta.exe` 실행
    - 서명되지 않은 프로그램이라 처음에 Windows SmartScreen 경고가 뜰 수 있습니다 → **추가 정보 → 실행**
-3. 처음 실행하면 **PoB 엔진**(계산용 파일 약 370MB)을 PoB 공식 GitHub 에서 받아 설치합니다.
+3. 처음 실행하면 알아서:
+   1. 이 저장소의 최신 릴리스를 확인해 더 새 버전이 있으면 받아서 다시 시작하고
+   2. **PoB 엔진**(계산용 파일 약 370MB)을 PoB 공식 GitHub 에서 받아 설치합니다.
 4. 캐릭터 화면에서 `+` 로 캐릭터를 등록합니다. (pathofexile.com 프로필 → Privacy Settings 에서 **Characters 탭 공개** 필요)
 5. 게임은 **창 모드 전체 화면(Windowed Fullscreen)** 이어야 비교 창이 게임 위에 보입니다.
 
-새 버전이 나오면 프로그램이 알려 주고 바로 업데이트할 수 있습니다.
+### 업데이트
+- 실행할 때마다 새 버전이 있는지 확인하고, 있으면 **업데이트할지 물어봅니다** (지금 업데이트 / 나중에 / 이 버전 건너뛰기).
+  업데이트는 앱 코드(1~2MB)만 받아서 몇 초면 끝나고, exe 는 다시 받을 필요가 없습니다.
+- 메뉴(☰) → **프로그램 업데이트 확인** 으로 직접 확인할 수도 있습니다.
+- 새 버전이 시작에 실패하면 자동으로 이전 버전으로 돌아갑니다.
+- 받은 코드는 `%LOCALAPPDATA%\ExileDelta\app\<버전>\` 에 있습니다.
 
 ## 저장 위치 · 네트워크
 
@@ -54,6 +61,9 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1 -NoRun # dist\ExileDelta.ex
 - Python 3.12, Windows 10/11
 - `data/*.json`(옵션 · 번역 사전)은 `tools/build_data.py`, `tools/build_names.py` 로 다시 만들 수 있습니다 (`build.ps1 -RefreshData`).
 - 구조: `app/` GUI(PySide6) · `app/pob/` PoB 엔진 연동(lupa/LuaJIT 로 PoB Lua 코드를 화면 없이 실행, 별도 워커 프로세스)
+- exe 는 `launcher/launcher.py`(로더 + 실행 환경)이고, 앱 코드(`app/`, `data/`)는 exe 안 기본본 또는 릴리스에서 받은
+  `app-<버전>.zip` 을 파일로 읽어 실행합니다 (`tools/pack_app.py`, 업데이트 로직은 `app/app_update.py`).
+- 릴리스: `app/version.py` 의 VERSION 을 올리고 `release.ps1 -NotesFile 변경내용.md` (`-Pre` 는 시험판: 자동 업데이트 대상 아님)
 
 ## 사용한 것 · 감사
 
