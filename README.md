@@ -1,84 +1,114 @@
 # Exile Delta
 
-**Path of Exile 1** 아이템을 게임에서 `Ctrl+C` 하면, 지금 내 캐릭터에 끼웠을 때 **DPS · EHP · 최대 피격**이 얼마나 바뀌는지 바로 보여 주는 Windows 데스크톱 도구입니다.
-계산은 [Path of Building Community](https://github.com/PathOfBuildingCommunity/PathOfBuilding)(PoB)의 원본 계산 코드를 그대로 돌려서 하기 때문에 **PoB 와 같은 숫자**가 나옵니다.
-한국어 게임 클라이언트에서 복사한 아이템 텍스트도 그대로 쓸 수 있습니다.
+POE1 하다가 템 하나 주울 때마다 PoB 켜서 붙여넣고 비교하는 게 너무 귀찮아서 만든 프로그램입니다.
 
-> A Windows desktop tool for Path of Exile 1: press `Ctrl+C` on an item in game and see how DPS / EHP / max hit would change on your character, calculated with the original Path of Building engine. Korean game client text is supported.
+게임에서 아이템에 마우스 올리고 `Ctrl+C` 누르면, 그 템을 지금 내 캐릭터에 꼈을 때 DPS, EHP, 최대 피격이 얼마나 바뀌는지 게임 화면 위에 바로 띄워 줍니다.
+계산은 Path of Building(PoB) 원본 코드를 그대로 돌려서 하기 때문에 PoB에서 직접 비교한 것과 숫자가 똑같이 나옵니다.
+한글 클라이언트에서 복사한 템도 알아서 영문으로 바꿔서 계산해요.
 
----
+> For English speakers: a Windows tool for Path of Exile 1. Press `Ctrl+C` on an item in game and it shows how your DPS / EHP / max hit would change, using the real Path of Building engine. Works with the Korean client too.
 
-## 주요 기능
+## 뭘 할 수 있나
 
-### 아이템 비교 (게임에서 Ctrl+C)
-- 게임에서 아이템 위에 마우스를 올리고 `Ctrl+C` → 게임 위에 비교 창이 뜹니다 (포커스를 빼앗지 않아 계속 다른 아이템을 `Ctrl+C` 할 수 있음)
-- 끼울 수 있는 자리(반지 1/2, 주얼 칸 등)마다 **Full DPS · EHP · 최대 피격(물리/화염/냉기/번개/카오스)** 변화
-- 저항 상한 미달 · 능력치 요구치 부족 경고, 순 생명력 재생(정의의 화염 같은 지속 피해를 뺀 값)
-- **ⓘ 왜 이렇게 바뀌나?** — 마우스를 올리면 요약, 누르면 옵션 줄마다 DPS/EHP 기여도
-- 옵션을 켜고 끄거나 수치를 고치고, 새 옵션(일반 · 총주교/포식자 · 타락 implicit)을 붙여 보며 바로 다시 계산
-- 한국어 클라이언트 텍스트 → 영문 자동 변환 후 계산
+**템 비교 (게임에서 Ctrl+C)**
+- 게임 위에 작은 창이 떠요. 포커스를 안 가져가서 그대로 다른 템에 계속 Ctrl+C 하면 됩니다.
+- 반지처럼 낄 자리가 여러 개면 자리마다 Full DPS / EHP / 최대 피격(물리, 화염, 냉기, 번개, 카오스) 변화를 따로 보여 줘요.
+- 저항이 상한 밑으로 떨어지거나 힘/민/지 요구치가 모자라면 경고가 뜹니다.
+- RF(정의의 화염) 같은 지속 피해를 뺀 실제 체젠도 같이 나와요.
+- "ⓘ 왜 이렇게 바뀌나?" 버튼에 마우스를 올리면 요약이, 누르면 옵션 한 줄 한 줄이 DPS/EHP에 얼마나 영향을 줬는지 나옵니다.
+- 옵션을 끄거나 수치를 바꾸거나, 총주교/포식자/타락 implicit을 붙여 보면서 바로 다시 계산할 수 있어요.
 
-### 캐릭터
-- pathofexile.com 공개 프로필(계정 이름) 또는 PoB 코드/링크로 캐릭터 가져오기
-- **1분마다 자동 갱신** (레벨업 · 장비 교체 · 패시브 반영, 사이트 요청 한도를 넘지 않게 조절)
-- 스킬 젬/그룹 켜기·끄기, Full DPS 포함, 주 스킬, 계산 설정(Configuration), 플라스크 — 다시 가져와도 유지
-- 장착 장비 · 주얼별 기여도, 젬 레벨/퀄리티별 효과, 패시브 트리 보기 · 찍어 보기
-- 아이템 만들기(유니크 · 베이스 + 옵션), 슬롯별 DPS 최적 옵션 추천(Beta)
+**캐릭터**
+- pathofexile.com 계정 이름이나 PoB 코드/링크로 캐릭터를 불러옵니다.
+- "1분마다 갱신"을 켜 두면 레벨업, 장비 교체, 패시브 찍은 게 알아서 반영돼요. 사이트 요청 제한에 안 걸리게 알아서 조절합니다.
+- 젬 켜고 끄기, Full DPS 체크, 주 스킬, 계산 설정, 플라스크 같은 건 다시 불러와도 그대로 남아요.
+- 장비/주얼별 기여도, 젬 레벨/퀄 올렸을 때 효과, 패시브 트리 보기와 찍어 보기, 아이템 만들기, 슬롯별 최적 옵션 추천(베타)도 있습니다.
 
-## 설치 · 실행
+## 설치
 
-1. [Releases](../../releases/latest) 에서 `ExileDelta-<버전>.zip` 을 받아 원하는 폴더에 풉니다.
-2. `ExileDelta.exe` 실행
-   - 서명되지 않은 프로그램이라 처음에 Windows SmartScreen 경고가 뜰 수 있습니다 → **추가 정보 → 실행**
-3. 처음 실행하면 알아서:
-   1. 이 저장소의 최신 릴리스를 확인해 더 새 버전이 있으면 받아서 다시 시작하고
-   2. **PoB 엔진**(계산용 파일 약 370MB)을 PoB 공식 GitHub 에서 받아 설치합니다.
-4. 캐릭터 화면에서 `+` 로 캐릭터를 등록합니다. (pathofexile.com 프로필 → Privacy Settings 에서 **Characters 탭 공개** 필요)
-5. 게임은 **창 모드 전체 화면(Windowed Fullscreen)** 이어야 비교 창이 게임 위에 보입니다.
+1. [Releases](../../releases/latest)에서 `ExileDelta-버전.zip`을 받아서 아무 폴더에 풀어 주세요.
+2. `ExileDelta.exe`를 실행합니다.
+   서명 안 된 프로그램이라 처음에 Windows가 "PC 보호" 경고를 띄울 수 있는데, **추가 정보 → 실행** 누르면 됩니다.
+3. 처음 켜면 두 가지를 알아서 받아요.
+   - 이 저장소에 더 새 버전이 올라와 있으면 그걸 받고 다시 켜집니다.
+   - 계산에 쓰는 PoB 엔진(약 370MB)을 PoB 공식 GitHub에서 받습니다. 처음 한 번만 받아요.
+4. 캐릭터 화면에서 `+` 눌러서 캐릭터를 등록하세요.
+   계정으로 불러오려면 pathofexile.com 프로필 → Privacy Settings에서 Characters 탭을 공개로 해 둬야 합니다.
+5. 게임은 **창 모드 전체 화면(Windowed Fullscreen)** 으로 해 주세요. 그래야 비교 창이 게임 위에 보여요.
 
-### 업데이트
-- 실행할 때마다 새 버전이 있는지 확인하고, 있으면 **업데이트할지 물어봅니다** (지금 업데이트 / 나중에 / 이 버전 건너뛰기).
-  업데이트는 앱 코드(1~2MB)만 받아서 몇 초면 끝나고, exe 는 다시 받을 필요가 없습니다.
-- 메뉴(☰) → **프로그램 업데이트 확인** 으로 직접 확인할 수도 있습니다.
-- 새 버전이 시작에 실패하면 자동으로 이전 버전으로 돌아갑니다.
-- 받은 코드는 `%LOCALAPPDATA%\ExileDelta\app\<버전>\` 에 있습니다.
+## 업데이트는 어떻게 되나
 
-## 저장 위치 · 네트워크
+exe를 매번 새로 받을 필요 없게 만들어 놨습니다.
 
-- 설정 · 등록한 캐릭터: `%APPDATA%\ExileDelta\`
-- PoB 엔진 · 로그 · 캐시: `%LOCALAPPDATA%\ExileDelta\`
-- 접속하는 곳: pathofexile.com(캐릭터 정보), github.com(PoB 엔진 · 프로그램 업데이트), repoe-fork.github.io(번역 데이터).
-  그 밖의 곳으로 개인 정보를 보내지 않습니다.
+프로그램을 켤 때마다 이 저장소의 최신 릴리스를 확인하고, 새 버전이 있으면 그동안 바뀐 내용을 보여 주면서 업데이트할지 물어봐요.
+여러 버전이 밀려 있으면(예: 1.0.0 쓰는데 1.0.3까지 나옴) 1.0.1, 1.0.2, 1.0.3 내용을 다 보여 줍니다.
+"지금 업데이트"를 누르면 몇 초 만에 받아서 다시 켜지고, "이 버전 건너뛰기"를 누르면 다음 버전이 나올 때까지 안 물어봐요.
 
-## 직접 빌드하기 (개발자용)
+메뉴(☰) → "프로그램 업데이트 확인"으로 직접 확인할 수도 있고, 지난 업데이트 내용은 메뉴의 "업데이트 내역 보기"나 아래 상태 표시줄의 버전 글씨를 누르면 볼 수 있습니다.
+
+### 릴리스에 올라가는 파일
+
+릴리스 하나에 파일이 세 개씩 올라갑니다. 사람이 받을 건 첫 번째 하나뿐이에요.
+
+| 파일 | 크기 | 용도 |
+|---|---|---|
+| `ExileDelta-버전.zip` | 약 53MB | **처음 설치할 때 받는 파일.** 안에 `ExileDelta.exe` 하나 들어 있어요. 파이썬, Qt 같은 실행에 필요한 것과 그 버전의 프로그램 코드가 전부 들어 있습니다. |
+| `app-버전.zip` | 약 1.4MB | 업데이트할 때 프로그램이 알아서 받는 파일이에요. 프로그램 코드(`app/`)와 옵션/번역 데이터(`data/`)만 들어 있습니다. 직접 받을 필요 없어요. |
+| `manifest.json` | 1KB 미만 | "최신 버전은 몇이고, 코드 파일은 이거고, 정상 파일이면 지문(SHA-256)이 이거다"라는 정보예요. 프로그램이 업데이트 확인할 때 읽습니다. |
+
+### 업데이트할 때 실제로 일어나는 일
+
+1. 켜지면 `manifest.json`을 읽어서 지금 버전보다 새 게 있는지 봅니다. 시험판(Pre-release)으로 올린 버전은 무시해요.
+2. 업데이트를 누르면 53MB짜리 exe가 아니라 `app-버전.zip`(1~2MB)만 받습니다.
+3. 받은 파일 지문이 `manifest.json`에 적힌 거랑 다르면 깨진 파일로 보고 설치 안 합니다.
+4. `%LOCALAPPDATA%\ExileDelta\app\버전\`에 풀고 프로그램을 다시 켭니다.
+5. exe는 그대로 두고, 켜질 때 그 폴더에 있는 새 코드로 실행돼요. 그래서 exe는 일종의 실행기 역할만 합니다.
+
+혹시 새 버전이 켜지다가 계속 죽으면(3번 연속으로 정상 시작을 못 하면) 그 버전은 고장 난 걸로 표시하고 알아서 이전 버전으로 돌아갑니다.
+이전 버전 폴더는 하나씩 남겨 두고, 그보다 오래된 건 지워요.
+
+### exe를 새로 받아야 하는 경우
+
+대부분은 코드만 바꿔서 업데이트되지만, 새 라이브러리를 넣거나 파이썬 버전을 올리는 것처럼 exe 자체가 바뀌어야 하는 경우가 가끔 있어요.
+그럴 땐 업데이트 창 대신 "새 설치 파일이 필요합니다"가 뜨고, 누르면 다운로드 페이지가 열립니다. 새 `ExileDelta-버전.zip`을 받아서 덮어쓰면 돼요. 설정이랑 캐릭터는 그대로 남습니다.
+
+## 파일이 어디 저장되나
+
+- 설정, 등록한 캐릭터: `%APPDATA%\ExileDelta\`
+- PoB 엔진, 받은 업데이트, 로그: `%LOCALAPPDATA%\ExileDelta\`
+
+프로그램이 접속하는 곳은 pathofexile.com(캐릭터 정보), github.com(PoB 엔진, 프로그램 업데이트), repoe-fork.github.io(번역 데이터)뿐이에요. 다른 데로 개인 정보를 보내지 않습니다.
+
+예전 이름(Exile Sieve)으로 쓰던 분은 새 버전을 처음 켤 때 예전 폴더가 자동으로 옮겨져요. 예전 프로그램은 꺼 두고 켜 주세요.
+
+## 직접 빌드하기
 
 ```powershell
 python -m pip install -r requirements.txt
-python app\main.py                                         # 개발 모드로 실행
-powershell -ExecutionPolicy Bypass -File .\build.ps1 -NoRun # dist\ExileDelta.exe 빌드
+python app\main.py                                          # 개발 모드로 바로 실행
+powershell -ExecutionPolicy Bypass -File .\build.ps1 -NoRun  # dist\ExileDelta.exe 만들기
 ```
 
-- Python 3.12, Windows 10/11
-- `data/*.json`(옵션 · 번역 사전)은 `tools/build_data.py`, `tools/build_names.py` 로 다시 만들 수 있습니다 (`build.ps1 -RefreshData`).
-- 구조: `app/` GUI(PySide6) · `app/pob/` PoB 엔진 연동(lupa/LuaJIT 로 PoB Lua 코드를 화면 없이 실행, 별도 워커 프로세스)
-- exe 는 `launcher/launcher.py`(로더 + 실행 환경)이고, 앱 코드(`app/`, `data/`)는 exe 안 기본본 또는 릴리스에서 받은
-  `app-<버전>.zip` 을 파일로 읽어 실행합니다 (`tools/pack_app.py`, 업데이트 로직은 `app/app_update.py`).
-- 릴리스: `app/version.py` 의 VERSION 을 올리고 `release.ps1 -NotesFile 변경내용.md` (`-Pre` 는 시험판: 자동 업데이트 대상 아님)
+- Windows 10/11, Python 3.12에서 만들고 있어요.
+- `app/`이 화면이랑 기능(PySide6), `app/pob/`이 PoB 엔진 연결 부분입니다. PoB의 Lua 코드를 lupa(LuaJIT)로 화면 없이 돌리고, 계산은 별도 프로세스에서 해요.
+- exe의 시작점은 `launcher/launcher.py`예요. 앱 코드는 exe에 컴파일해 넣지 않고 파일로 읽어서 돌립니다. 그래야 업데이트로 받은 코드가 쓰이거든요. `tools/pack_app.py`가 `app-버전.zip`이랑 `manifest.json`을 만들고, 업데이트 처리는 `app/app_update.py`에 있습니다.
+- 옵션/번역 데이터(`data/*.json`)는 `build.ps1 -RefreshData`로 다시 만들 수 있어요.
+- 릴리스 낼 때는 `app/version.py`의 버전을 올리고 `release.ps1 -NotesFile 변경내용.md`를 돌리면 빌드부터 GitHub 업로드까지 한 번에 됩니다. `-Pre`를 붙이면 시험판으로 올라가서 자동 업데이트 대상에서 빠져요.
 
-## 사용한 것 · 감사
+## 고마운 프로젝트들
 
-- [Path of Building Community](https://github.com/PathOfBuildingCommunity/PathOfBuilding) (MIT) — 모든 DPS/EHP 계산. 프로그램에 포함하지 않고 실행할 때 공식 릴리스를 내려받아 사용합니다.
-- [RePoE fork](https://repoe-fork.github.io/) — 아이템 옵션 · 영문/한글 문장 데이터
-- [Awakened PoE Trade](https://github.com/SnosMe/awakened-poe-trade) (MIT) — 한국어 클라이언트 문장 · 이름 데이터 보충
+- [Path of Building Community](https://github.com/PathOfBuildingCommunity/PathOfBuilding) (MIT): DPS/EHP 계산은 전부 이걸로 합니다. 프로그램에 넣어서 배포하지 않고, 실행할 때 공식 릴리스를 받아서 써요.
+- [RePoE fork](https://repoe-fork.github.io/): 아이템 옵션, 영문/한글 문장 데이터
+- [Awakened PoE Trade](https://github.com/SnosMe/awakened-poe-trade) (MIT): 한글 클라이언트 문장이랑 이름 데이터 보충
 - [PySide6](https://doc.qt.io/qtforpython/), [lupa](https://github.com/scoder/lupa), [requests](https://github.com/psf/requests)
 
 ## 라이선스
 
-[MIT](LICENSE) — 자유롭게 사용 · 수정 · 배포할 수 있습니다.
+[MIT](LICENSE)입니다. 마음대로 쓰고 고치고 배포하셔도 돼요.
 
-## 고지
+## 알림
 
-**이 프로그램은 Grinding Gear Games 와 아무 관련이 없으며, Grinding Gear Games 가 승인하거나 보증한 것이 아닌 팬 제작 도구입니다.**
-Path of Exile 및 관련 이름 · 데이터의 권리는 Grinding Gear Games 에 있습니다.
+**이 프로그램은 Grinding Gear Games와 아무 관련이 없고, Grinding Gear Games가 승인하거나 보증한 것도 아닌 개인이 만든 팬 도구입니다.**
+Path of Exile과 관련 이름, 데이터의 권리는 Grinding Gear Games에 있어요.
 
 *This product isn't affiliated with or endorsed by Grinding Gear Games in any way.*
