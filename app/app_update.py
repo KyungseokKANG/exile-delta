@@ -233,6 +233,62 @@ def relaunch() -> None:
                      creationflags=0x00000008 | 0x00000200)
 
 
+READY_FILE = APPS / "ready.txt"
+
+
+def mark_ready() -> None:
+    """새로 켜진 프로그램이 창을 띄웠다고 알림 → 이전 프로그램이 그걸 보고 닫힘 (빈틈 없이 넘겨받기)."""
+    import time
+
+    try:
+        APPS.mkdir(parents=True, exist_ok=True)
+        READY_FILE.write_text(f"{time.time()} {os.getpid()}", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def hand_over(win, dlg=None, timeout: float = 40.0) -> None:
+    """새 버전을 바로 띄우고, 그 창이 뜰 때까지 지금 창은 '다시 켜는 중' 으로 남겨 둠.
+    (예전엔 먼저 닫고 새로 켜서 단일 exe 가 풀리는 몇 초 동안 아무것도 안 보였음)"""
+    import time
+
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+
+    RESTART["want"] = True
+    RESTART["spawned"] = True
+    srv = getattr(win, "_single_server", None)
+    if srv is not None:
+        srv.close()  # 새 프로그램이 '이미 실행 중' 으로 보고 꺼지지 않게
+    try:
+        win.client.stop()
+    except Exception:  # noqa: BLE001
+        pass
+    t0 = time.time()
+    relaunch()
+
+    def quit_now():
+        timer.stop()
+        if dlg is not None:
+            dlg.close()
+        win.close()
+        QApplication.instance().quit()
+
+    def poll():
+        try:
+            ts = float(READY_FILE.read_text(encoding="utf-8").split()[0])
+        except (OSError, ValueError, IndexError):
+            ts = 0.0
+        if ts >= t0 or time.time() - t0 > timeout:
+            quit_now()
+
+    timer = QTimer(win)
+    timer.setInterval(250)
+    timer.timeout.connect(poll)
+    timer.start()
+    win._handover_timer = timer
+
+
 # ---------------------------------------------------------------- 화면
 class StartupUpdater:
     """시작할 때 한 번: 업데이트 확인 → (처음 실행이면 바로, 아니면 물어보고) 설치 → 재시작.
@@ -324,32 +380,30 @@ class StartupUpdater:
 
         from asyncjob import run_async
 
-        dlg = QProgressDialog(f"v{inf['version']} 받는 중…", "", 0, 0, self.win)
+        head = f"최신 버전(v{inf['version']})으로 맞추는 중이에요.\n끝나면 프로그램이 알아서 다시 켜져요."
+        dlg = QProgressDialog(head, "", 0, 0, self.win)
         dlg.setWindowTitle("프로그램 업데이트")
         dlg.setCancelButton(None)
         dlg.setWindowModality(Qt.WindowModality.WindowModal)
         dlg.setMinimumDuration(0)
+        dlg.setMinimumWidth(380)
         dlg.show()
 
         def prog(d, t, m):
             dlg.setRange(0, max(1, t))
             dlg.setValue(d)
-            dlg.setLabelText(m)
+            dlg.setLabelText(f"{head}\n\n{m}")
 
         def ok(ver):
-            dlg.close()
             from storage import load_settings, save_settings
 
             s = load_settings()
             s["app_update_seen"] = True
+            s["app_updated"] = {"from": VERSION, "to": ver}  # 새로 켜진 쪽에서 '업데이트됐어요' 표시
             save_settings(s)
-            if hasattr(self.win, "flash"):
-                self.win.flash(f"v{ver} 설치 완료 — 다시 시작합니다")
-            RESTART["want"] = True
-            from PySide6.QtCore import QTimer
-            from PySide6.QtWidgets import QApplication
-
-            QTimer.singleShot(300, lambda: (self.win.close(), QApplication.instance().quit()))
+            dlg.setRange(0, 0)
+            dlg.setLabelText(f"v{ver} 받기 완료.\n새 버전으로 다시 켜는 중이에요… (몇 초 걸려요)")
+            hand_over(self.win, dlg)
 
         def fail(msg):
             dlg.close()

@@ -419,11 +419,26 @@ def main() -> int:
         win.flash("이미 실행 중이라 이 창을 띄웠습니다")
     server.newConnection.connect(_activate)
 
+    win._single_server = server
     win.showMaximized() if win.start_max else win.show()
-    code = app.exec()
     import app_update
 
-    if app_update.RESTART["want"]:
+    # 업데이트로 다시 켜진 경우: 이전 프로그램에 '창 떴음' 알림(이걸 보고 이전 창이 닫힘) + 업데이트됐다고 표시
+    QTimer.singleShot(150, app_update.mark_ready)
+
+    def _updated_note() -> None:
+        from storage import load_settings, save_settings
+        from version import VERSION
+
+        s = load_settings()
+        up = s.pop("app_updated", None)
+        if up:
+            save_settings(s)
+            if up.get("to") == VERSION:
+                win.flash(f"v{up.get('from')} → v{VERSION} 업데이트 완료! 바뀐 내용은 아래 버전 글씨를 누르면 볼 수 있어요")
+    QTimer.singleShot(400, _updated_note)
+    code = app.exec()
+    if app_update.RESTART["want"] and not app_update.RESTART.get("spawned"):
         server.close()  # 새 프로세스가 '이미 실행 중' 으로 착각하지 않게
         win.client.stop()
         app_update.relaunch()
