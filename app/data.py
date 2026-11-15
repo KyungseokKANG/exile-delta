@@ -71,9 +71,10 @@ class ModDB:
         self.influences: dict[str, str] = d["influences"]
         self.slots: list[dict] = d["slots"]
         self.mods: dict[str, list[dict]] = d["mods"]
+        self.crafted: dict[str, list[dict]] = d.get("crafted", {})  # 제작 벤치 옵션
         self._slot_by_id = {s["id"]: s for s in self.slots}
-        self._by_key = {e["key"]: e for lst in self.mods.values() for e in lst}
-        for lst in self.mods.values():
+        self._by_key = {e["key"]: e for lst in (*self.mods.values(), *self.crafted.values()) for e in lst}
+        for lst in (*self.mods.values(), *self.crafted.values()):
             for e in lst:
                 inf = self.influences.get(e["inf"], "")
                 e["_hay"] = f"{e['ko']} {e['en']} {inf}".lower()
@@ -94,6 +95,9 @@ class ModDB:
 
     def options(self, slot: str) -> list[dict]:
         return self.mods.get(slot, [])
+
+    def craft_options(self, slot: str) -> list[dict]:
+        return self.crafted.get(slot, [])
 
     def get(self, key: str) -> dict | None:
         return self._by_key.get(key)

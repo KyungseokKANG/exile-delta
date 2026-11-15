@@ -398,9 +398,9 @@ class ItemEditor(QWidget):
         self.kind_combo = QComboBox()
         for k, label in KINDS:
             self.kind_combo.addItem(label, k)
-        self.add_btn = QPushButton("+ 일반 옵션 검색")
+        self.add_btn = QPushButton("+ 옵션 검색 (제작 벤치 포함)")
         self.add_btn.setObjectName("OverlayEdit")
-        self.add_btn.setToolTip("접두/접미 옵션을 티어별로 검색해서 추가")
+        self.add_btn.setToolTip("접두/접미 옵션과 제작 벤치 옵션을 티어별로 검색해서 추가")
         self.add_btn.clicked.connect(self._add_from_search)
         self.imp_btn = QPushButton("+ 총주교 · 포식자 · 바알")
         self.imp_btn.setObjectName("OverlayEdit")
@@ -647,14 +647,15 @@ class ItemEditor(QWidget):
     def _add_from_search(self) -> None:
         from search import SearchDialog
 
-        dlg = SearchDialog(self.db, self.slot, set(), self)
+        dlg = SearchDialog(self.db, self.slot, set(), self, with_craft=True)
         dlg.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         if not dlg.exec() or not dlg.selected_key or not dlg.selected_tier:
             return
-        # 선택한 티어의 최고 굴림 수치로 문장 생성
+        # 선택한 티어의 최고 굴림 수치로 문장 생성 (제작 벤치 옵션은 제작 옵션으로)
+        kind = "crafted" if (dlg.selected_entry or {}).get("crafted") else self.kind_combo.currentData()
         text = RANGE_RE.sub(lambda m: m.group(2), dlg.selected_tier["text"])
         for part in text.split(" / "):
-            self._add_mod(part, self.kind_combo.currentData())
+            self._add_mod(part, kind)
 
     # ------------------------------------------------------------ 계산
     def _active_mods(self) -> list[Mod]:

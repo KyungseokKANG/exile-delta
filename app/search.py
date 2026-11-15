@@ -40,6 +40,11 @@ class ResultRow(QWidget):
         h.setContentsMargins(10, 6, 12, 6)
         h.setSpacing(8)
         h.addWidget(gen_badge(entry))
+        if entry.get("crafted"):
+            c = QLabel("제작")
+            c.setObjectName("BadgeInf")
+            c.setStyleSheet("color: #b9e0ff;")
+            h.addWidget(c)
         if entry["inf"]:
             inf = QLabel(db.influence_name(entry["inf"]))
             inf.setObjectName("BadgeInf")
@@ -57,14 +62,15 @@ class ResultRow(QWidget):
 
 
 class SearchDialog(FramelessDialog):
-    def __init__(self, db, slot: str, existing: set[str], parent=None):
+    def __init__(self, db, slot: str, existing: set[str], parent=None, with_craft: bool = False):
         super().__init__(parent)
         self.db = db
         self.selected_key: str | None = None
         self.selected_value: float | None = None
         self.selected_tier: dict | None = None
+        self.selected_entry: dict | None = None
         self._cur_entry: dict | None = None
-        self.entries = db.options(slot)
+        self.entries = db.options(slot) + (db.craft_options(slot) if with_craft else [])
         self.resize(980, 640)
 
         v = QVBoxLayout(self.frame)
@@ -106,7 +112,7 @@ class SearchDialog(FramelessDialog):
         chips = QHBoxLayout()
         chips.setSpacing(6)
         self.chip_group = QButtonGroup(self)
-        for i, label in enumerate(["전체", "접두", "접미", "영향력"]):
+        for i, label in enumerate(["전체", "접두", "접미", "영향력"] + (["제작 벤치"] if with_craft else [])):
             b = QPushButton(label)
             b.setObjectName("FilterChip")
             b.setCheckable(True)
@@ -202,6 +208,8 @@ class SearchDialog(FramelessDialog):
                 ok = ok and e["gen"] == "suffix" and not e["inf"]
             elif mode == 3:
                 ok = ok and bool(e["inf"])
+            elif mode == 4:
+                ok = ok and bool(e.get("crafted"))
             self.list.item(i).setHidden(not ok)
             shown += ok
         self.count.setText(f"{shown}개 옵션")
@@ -233,6 +241,8 @@ class SearchDialog(FramelessDialog):
         prefix = self.db.influence_name(e["inf"]) + " · " if e["inf"] else ""
         self.d_title.setText(e["ko"])
         avg = "  ·  평균값 (최소+최대)÷2 로 비교" if e["metric"] == "avg2" else ""
+        if e.get("crafted"):
+            prefix = "제작 벤치 · "
         self.d_en.setText(f"{prefix}{'접두' if e['gen'] == 'prefix' else '접미'}  ·  {e['en']}{avg}")
         self.table.setRowCount(len(e["tiers"]))
         for r, t in enumerate(e["tiers"]):
@@ -279,6 +289,7 @@ class SearchDialog(FramelessDialog):
         self.selected_key = it.data(Qt.ItemDataRole.UserRole)
         self.selected_value = t["lo"]
         self.selected_tier = t
+        self.selected_entry = self._cur_entry
         self.accept()
 
     def eventFilter(self, obj, ev):

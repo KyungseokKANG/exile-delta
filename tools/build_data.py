@@ -23,6 +23,7 @@ FILES = {
     "mods_ko": "Korean/mods.min.json",
     "bases_en": "base_items.min.json",
     "classes": "item_classes.min.json",
+    "bench": "crafting_bench_options.min.json",
 }
 
 # (item_class, 한글명, 분류)
@@ -135,6 +136,55 @@ def metric(kind: str, values: list[float]) -> float:
     return values[0]
 
 
+def craft_entries(cls: str, bench: list, mods_en: dict, mods_ko: dict) -> list[dict]:
+    """제작 벤치 옵션 (crafting_bench_options 의 add_explicit_mod). 같은 스탯끼리 묶어 높은 단계가 T1."""
+    ladders: dict[str, list[tuple[int, str]]] = {}
+    for o in bench:
+        mid = o.get("actions", {}).get("add_explicit_mod")
+        m = mods_en.get(mid) if mid else None
+        if not m or cls not in o.get("item_classes", []) or not m.get("stats") or not m.get("text"):
+            continue
+        if m["generation_type"] not in ("prefix", "suffix"):
+            continue
+        key = f"{m['type']}|{','.join(s['id'] for s in m['stats'])}|{m['generation_type']}"
+        lst = ladders.setdefault(key, [])
+        if all(x[1] != mid for x in lst):
+            lst.append((o.get("bench_tier", 0), mid))
+    out = []
+    for key, lst in ladders.items():
+        lst.sort(key=lambda x: (x[0], mods_en[x[1]]["required_level"], x[1]), reverse=True)
+        mids = [x[1] for x in lst]
+        top = mods_en[mids[0]]
+        kind = metric_kind(top["text"])
+        tiers = []
+        for i, mid in enumerate(mids, start=1):
+            m = mods_en[mid]
+            ranges = display_ranges(m["text"].splitlines()[0])
+            lo = metric(kind, [r[0] for r in ranges])
+            hi = metric(kind, [r[1] for r in ranges])
+            tiers.append({
+                "t": i,
+                "lv": m["required_level"],
+                "name": "제작",
+                "text": (mods_ko.get(mid, {}).get("text") or m["text"]).replace("\n", " / "),
+                "lo": min(lo, hi),
+                "hi": max(lo, hi),
+            })
+        out.append({
+            "key": f"{cls}|craft|{key}",
+            "gen": top["generation_type"],
+            "inf": "",
+            "crafted": True,
+            "ko": template([mods_ko.get(x, {}).get("text") or mods_en[x]["text"] for x in mids]),
+            "en": template([mods_en[x]["text"] for x in mids]),
+            "metric": kind,
+            "decimals": 1 if any(t["lo"] != int(t["lo"]) or t["hi"] != int(t["hi"]) for t in tiers) else 0,
+            "tiers": tiers,
+        })
+    out.sort(key=lambda e: (e["gen"], e["ko"]))
+    return out
+
+
 def main() -> None:
     refresh = "--refresh" in sys.argv
     mods_en = fetch("mods_en", refresh)
@@ -152,8 +202,10 @@ def main() -> None:
     }
     print(f"candidate mods: {len(candidates)}")
 
+    bench = fetch("bench", refresh)
     out_slots = []
     out_mods: dict[str, list] = {}
+    out_craft: dict[str, list] = {}
 
     for cls, ko_name, category in SLOTS:
         base_tags = [
@@ -216,8 +268,9 @@ def main() -> None:
             })
         entries.sort(key=lambda e: (e["inf"] != "", e["inf"], e["gen"], e["ko"]))
         out_mods[cls] = entries
+        out_craft[cls] = craft_entries(cls, bench, mods_en, mods_ko)
         out_slots.append({"id": cls, "ko": ko_name, "en": cls, "category": category})
-        print(f"{cls:28s} {len(entries):4d} options")
+        print(f"{cls:28s} {len(entries):4d} options  {len(out_craft[cls]):3d} bench")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(
@@ -228,6 +281,7 @@ def main() -> None:
                 "influences": INFLUENCES,
                 "slots": out_slots,
                 "mods": out_mods,
+                "crafted": out_craft,
             },
             ensure_ascii=False,
             separators=(",", ":"),
