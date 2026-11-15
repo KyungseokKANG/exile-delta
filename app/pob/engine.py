@@ -202,3 +202,9 @@ class PobEngine:
     def explain_item(self, item_text: str, slot: str) -> dict:
         """옵션 줄마다 DPS/EHP 기여도 (새 아이템 줄 / 지금 장비 줄)."""
         return _to_py(self.g.es_explain_item(item_text.encode("utf-8"), slot.encode("utf-8")))
+
+    def slot_variant(self, slot: str, off: list, contrib: bool = False) -> dict:
+        """지금 장착한 아이템에서 off 줄([[목록 이름, 번호], …])을 뺐을 때 계산 결과 + 줄 목록.
+        contrib: 줄마다 그 줄만 뺐을 때 잃는 양(d)도."""
+        spec = ",".join(f"{a}:{int(b)}" for a, b in off)
+        return _to_py(self.g.es_slot_variant(slot.encode("utf-8"), spec.encode("utf-8"), bool(contrib)))

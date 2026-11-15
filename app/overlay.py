@@ -306,11 +306,15 @@ class Overlay(QWidget):
             mh = Overlay._maxhit_line(b0, st)
             if mh:
                 lines.append(mh)
-            from statfmt import regen_cell
+            from statfmt import regen_cell, rf_lines
 
-            rg = regen_cell(b0, st)
-            if rg:
-                lines.append(f"<span style='font-size:10.5pt'>{rg}</span>")
+            rf = rf_lines(b0, st)
+            if rf:  # RF 등 스스로 받는 지속 피해: 순 회복 카드 (PoB 값)
+                lines.append("<span style='font-size:10.5pt'>" + "<br>".join(rf) + "</span>")
+            else:
+                rg = regen_cell(b0, st)
+                if rg:
+                    lines.append(f"<span style='font-size:10.5pt'>{rg}</span>")
             cells = []
             for key, name in (("Life", "생명력"), ("EnergyShield", "에너지 보호막"), ("Mana", "마나"),
                               ("FireResist", "화염 저항"), ("ColdResist", "냉기 저항"),

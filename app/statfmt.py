@@ -127,20 +127,97 @@ def swap_warnings(a: dict, b: dict) -> list[str]:
     return out
 
 
+# ---------------------------------------------------------------- RF 등 스스로 받는 지속 피해
+# 전부 PoB 값 그대로 (사이드바 Total Degen / Net Life · ES · Mana Recovery).
+# PoB 는 보호막 재생이 있으면 지속 피해를 보호막이 받고(뚫는 몫만 생명력), 없으면 생명력이 다 받는다.
+POOLS = (("Life", "생명력", "#e07a6a"), ("EnergyShield", "보호막", "#9fb5ff"), ("Mana", "마나", "#7f9fff"))
+RF_COL = "#e8794f"
+
+
+def has_degen(*stats: dict) -> bool:
+    return any((s or {}).get("TotalBuildDegen") or (s or {}).get("LifeDegen") for s in stats)
+
+
+def net_regen(st: dict, pool: str) -> float | None:
+    """순 회복(초당). PoB 는 지속 피해가 없으면 Net* 를 안 만들어서 그땐 재생 값 그대로."""
+    v = st.get(f"Net{pool}Regen")
+    return v if v is not None else st.get(f"{pool}RegenRecovery")
+
+
+def degen_pools(*stats: dict) -> list[str]:
+    """지속 피해를 실제로 받는 쪽 (중요한 순). 보호막 재생이 있으면 보호막 먼저."""
+    out = []
+    es = any(((s or {}).get("EnergyShieldRegenRecovery") or 0) > 0 for s in stats)
+    if es:
+        out.append("EnergyShield")
+    # 생명력: 보호막 쪽이 아니면 다 받고, 보호막 쪽이어도 뚫고 들어오는 몫이 있으면
+    if not es or any((net_regen(s or {}, "Life") or 0) < ((s or {}).get("LifeRegenRecovery") or 0) - 0.5 for s in stats):
+        out.append("Life")
+    if any((net_regen(s or {}, "Mana") or 0) < ((s or {}).get("ManaRegenRecovery") or 0) - 0.5 for s in stats):
+        out.append("Mana")  # 마음의 지배 등으로 마나가 일부 받음
+    return out
+
+
+def _pool(p: str) -> tuple[str, str]:
+    return next((nm, c) for k, nm, c in POOLS if k == p)
+
+
+def _max_key(p: str) -> str:
+    return "Life" if p == "Life" else "EnergyShield" if p == "EnergyShield" else "Mana"
+
+
+def rf_lines(base: dict, new: dict) -> list[str]:
+    """비교 창용 RF 카드 (여러 줄 HTML). 지속 피해가 없으면 빈 목록."""
+    if not base or not new or not has_degen(base, new):
+        return []
+    out = []
+    da, db = base.get("TotalBuildDegen") or 0, new.get("TotalBuildDegen") or 0
+    dcol = NEG if db > da + 0.05 else POS if db < da - 0.05 else DIM
+    out.append(f"<span style='color:{RF_COL}; font-weight:bold'>RF 기준</span> "
+               f"<span style='color:{DIM}'>스스로 받는 지속 피해</span> {da:,.1f} → "
+               f"<b style='color:{dcol}'>{db:,.1f}</b>/초")
+    warns = []
+    for i, p in enumerate(degen_pools(base, new)):
+        nm, pc = _pool(p)
+        a, b = net_regen(base, p), net_regen(new, p)
+        if a is None or b is None:
+            continue
+        d = b - a
+        col = POS if d > 0.05 else NEG if d < -0.05 else DIM
+        size = "font-size:12.5pt; " if i == 0 else ""
+        mx_a, mx_b = base.get(_max_key(p)) or 0, new.get(_max_key(p)) or 0
+        share = ""
+        if mx_a > 0 and mx_b > 0:
+            share = f" <span style='color:{DIM}; font-size:10pt'>({nm}의 {a / mx_a * 100:.1f}% → {b / mx_b * 100:.1f}%)</span>"
+        out.append(f"&nbsp;&nbsp;<span style='color:{pc}'>순 {nm} 회복</span> {a:+,.1f} → "
+                   f"<b style='{size}color:{col}'>{b:+,.1f}</b>/초 "
+                   f"<span style='color:{col}'>({d:+,.1f})</span>{share}")
+        if b < 0:
+            warns.append(nm)
+    if warns:
+        out.append(f"&nbsp;&nbsp;<b style='color:{NEG}'>⚠ 순 {'·'.join(warns)} 회복이 마이너스예요 — 이대로면 RF 못 켜요</b>")
+    return out
+
+
 def regen_cell(base: dict, new: dict) -> str:
-    """생명력 재생 변화. RF 등 스스로 받는 지속 피해가 있으면 그걸 뺀 '순 재생' 기준 (음수면 경고)."""
+    """생명력 재생 변화 한 칸. RF 등 지속 피해가 있으면 그걸 받는 쪽의 '순 회복' 기준 (음수면 경고)."""
     if not base or not new:
         return ""
-    degen = (base.get("LifeDegen") or 0) > 0 or (new.get("LifeDegen") or 0) > 0
-    key = "NetLifeRegen" if degen else "LifeRegenRecovery"
-    a, b = base.get(key), new.get(key)
+    if has_degen(base, new):
+        pools = degen_pools(base, new) or ["Life"]
+        p = pools[0]
+        nm, _ = _pool(p)
+        a, b = net_regen(base, p), net_regen(new, p)
+        if a is None or b is None or abs(b - a) < 1:
+            return ""
+        col = POS if b > a else NEG
+        warn = f" <b style='color:{NEG}'>⚠ RF 못 켬</b>" if b < 0 <= a else ""
+        return (f"<span style='color:{DIM}'>RF 순 {nm} 회복</span> {a:,.0f} → "
+                f"<b style='color:{col}'>{b:,.0f}</b>/초{warn}")
+    a, b = base.get("LifeRegenRecovery"), new.get("LifeRegenRecovery")
     if a is None or b is None or abs(b - a) < 1:
         return ""
     col = POS if b > a else NEG
-    if degen:
-        warn = f" <b style='color:{NEG}'>⚠ 생명력이 계속 줄어듦</b>" if b < 0 <= a else ""
-        return (f"<span style='color:{DIM}'>순 체젠(RF 등 피해 뺀)</span> {a:,.0f} → "
-                f"<b style='color:{col}'>{b:,.0f}</b>/초{warn}")
     return f"<span style='color:{DIM}'>체젠</span> <b style='color:{col}'>{b - a:+,.0f}</b>/초"
 
 

@@ -354,7 +354,9 @@ class CharacterPage(QWidget):
             "EnergyShield": StatTile("에너지 보호막", "#9fb5ff"),
             "Mana": StatTile("마나", "#7f9fff"),
             "Speed": StatTile("초당 사용", "#c8a96a"),
+            "NetRecovery": StatTile("RF 순 회복", "#e8794f"),
         }
+        self.tiles["NetRecovery"].hide()
         self.tiles["CombinedDPS"].setToolTip("Combined DPS: 주 스킬의 타격 + 도트·점화·중독 합")
         self.tiles["TotalDPS"].setToolTip("타격 DPS 만 (도트·점화·중독 제외)")
         self.tiles["TotalEHP"].setToolTip("계산 설정(Configuration) 기준 유효 체력")
@@ -1115,6 +1117,27 @@ class CharacterPage(QWidget):
         for k, tile in self.tiles.items():
             v = st.get(k)
             sub = ""
+            if k == "NetRecovery":
+                # RF 등 스스로 받는 지속 피해가 있을 때만: 그 피해를 받는 쪽의 순 회복 (PoB Net Recovery 값)
+                from statfmt import _pool, degen_pools, has_degen, net_regen
+
+                on = bool(st) and has_degen(st)
+                tile.setVisible(on)
+                if not on:
+                    continue
+                pools = degen_pools(st) or ["Life"]
+                v = net_regen(st, pools[0])
+                nm, _ = _pool(pools[0])
+                sub = f"RF 피해 {st.get('TotalBuildDegen') or 0:,.0f}/초" if pools[0] == "Life" else f"{nm} 기준"
+                rows = [f"스스로 받는 지속 피해 {st.get('TotalBuildDegen') or 0:,.1f}/초"]
+                for p in pools:
+                    rows.append(f"순 {_pool(p)[0]} 회복 {net_regen(st, p) or 0:+,.1f}/초")
+                if st.get("TotalNetRegen") is not None:
+                    rows.append(f"전체 순 회복 {st['TotalNetRegen']:+,.1f}/초")
+                tile.setToolTip("\n".join(rows) + "\n(PoB 사이드바 Net Recovery 와 같은 값)")
+                tile.set(f"{v:+,.0f}/초" if v is not None else "—", sub)
+                tile.v.setStyleSheet(f"color: {'#e0644c' if (v or 0) < 0 else '#e8794f'};")
+                continue
             if k == "CombinedDPS":
                 sub = main_name
                 md = st.get("MinionDPS")

@@ -141,6 +141,10 @@ local STAT_KEYS = {
 	"FireResistOverCap", "ColdResistOverCap", "LightningResistOverCap", "ChaosResistOverCap",
 	"MissingFireResist", "MissingColdResist", "MissingLightningResist", "MissingChaosResist",
 	"ReqStr", "ReqDex", "ReqInt",
+	-- 스스로 받는 지속 피해(RF 등)와 회복: PoB 사이드바 Total Degen / Net Life · ES · Mana Recovery / Total Net Recovery
+	-- (Net* 는 지속 피해가 있을 때만 PoB 가 계산. 피해는 보호막 재생이 있으면 보호막, 없으면 생명력이 받음)
+	"TotalBuildDegen", "NetEnergyShieldRegen", "NetManaRegen", "TotalNetRegen",
+	"EnergyShieldRegenRecovery", "ManaRegenRecovery",
 }
 
 -- 소환수를 부르는 주 스킬(면죄 · 지배의 일격 · 좀비 등): 소환수 DPS 를 '주 스킬 DPS'(CombinedDPS)에 더할지
@@ -1938,7 +1942,9 @@ end
 -- '왜 이렇게 바뀌나': 옵션 줄을 하나씩 빼고 다시 계산해서 줄마다 기여도를 구한다.
 --  새 아이템 줄: (새 아이템 전체) - (그 줄 뺀 새 아이템)  → 이 줄이 주는 것
 --  지금 장비 줄: (지금 상태) - (그 줄 뺀 지금 장비)      → 바꾸면 잃는 것
-local EXPLAIN_KEYS = { "FullDPS", "CombinedDPS", "TotalEHP", "Life", "EnergyShield", "Mana" }
+local EXPLAIN_KEYS = { "FullDPS", "CombinedDPS", "TotalEHP", "Life", "EnergyShield", "Mana",
+	-- 재생 / RF 등 지속 피해를 뺀 순 회복 (PoB Net* 는 지속 피해가 있을 때만 있음)
+	"LifeRegenRecovery", "EnergyShieldRegenRecovery", "NetLifeRegen", "NetEnergyShieldRegen", "NetManaRegen" }
 local function explainPick(o)
 	local t = { }
 	for _, k in ipairs(EXPLAIN_KEYS) do
@@ -1970,6 +1976,7 @@ local function explainLines(item, slotName, calcFunc, ref, sign)
 					if a and b and a < 1e299 and b < 1e299 then d[k] = sign * (a - b) end
 				end
 				out[#out + 1] = {
+					list = listName, idx = i,
 					line = ml.line, kind = listName:gsub("ModLines", ""), crafted = ml.crafted or nil,
 					unsupported = (ml.extra or (ml.modList and #ml.modList == 0)) and true or nil, d = d,
 				}
@@ -1977,6 +1984,60 @@ local function explainLines(item, slotName, calcFunc, ref, sign)
 		end
 	end
 	return out
+end
+
+-- '장착템 옵션 끄고 켜기': 지금 슬롯에 낀 아이템에서 spec("explicitModLines:2,implicitModLines:1") 줄을 뺀
+-- 상태로 계산. 줄 목록도 같이 돌려줌 (번호 = PoB 목록 안 순서, 다시 부를 때 그대로 씀)
+local VARIANT_LISTS = { "enchantModLines", "implicitModLines", "explicitModLines" }
+function es_slot_variant(slotName, spec, contrib)
+	local itemsTab = build.itemsTab
+	local slot = itemsTab.slots[slotName]
+	if not slot then return { error = "no slot " .. tostring(slotName) } end
+	local cur = itemsTab.items[slot.selItemId]
+	if not cur then return { error = "empty" } end
+	local calcFunc, calcBase = build.calcsTab:GetMiscCalculator()
+	local res = { slot = slotName, name = cur.name, base_name = cur.baseName, rarity = cur.rarity,
+		quality = cur.quality, base = pickStats(calcBase), lines = { } }
+	local off, any = { }, false
+	for l, i in tostring(spec or ""):gmatch("(%a+):(%d+)") do
+		off[l .. ":" .. i] = true
+		any = true
+	end
+	for _, listName in ipairs(VARIANT_LISTS) do
+		for i, ml in ipairs(cur[listName] or { }) do
+			if cur:CheckModLineVariant(ml) and ml.line and ml.line ~= "" then
+				res.lines[#res.lines + 1] = {
+					list = listName, idx = i, line = ml.line, kind = (listName:gsub("ModLines", "")),
+					crafted = ml.crafted or nil, fractured = ml.fractured or nil,
+					unsupported = (ml.extra or (ml.modList and #ml.modList == 0)) and true or nil,
+					off = off[listName .. ":" .. i] or nil,
+				}
+			end
+		end
+	end
+	if contrib then
+		-- 줄마다 '이 줄 하나만 빼면 잃는 양' (전부 켠 지금 장비 기준, 왜 이렇게 바뀌나 와 같은 계산)
+		local by = { }
+		for _, e in ipairs(explainLines(cur, slotName, calcFunc, explainPick(calcBase), 1)) do
+			by[e.list .. ":" .. e.idx] = e.d
+		end
+		for _, l in ipairs(res.lines) do l.d = by[l.list .. ":" .. l.idx] end
+	end
+	if any then
+		local clone = new("Item", cur:BuildRaw())
+		for _, listName in ipairs(VARIANT_LISTS) do
+			local t = clone[listName] or { }
+			for i = #t, 1, -1 do
+				if off[listName .. ":" .. i] then table.remove(t, i) end
+			end
+		end
+		clone:BuildAndParseRaw()
+		clone:BuildModList()
+		res.stats = pickStats(calcFunc({ repSlotName = slotName, repItem = clone }))
+	else
+		res.stats = res.base
+	end
+	return res
 end
 
 function es_explain_item(itemText, slotName)

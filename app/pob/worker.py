@@ -131,6 +131,8 @@ def run(port: int, log_path: Path) -> int:
                 result = engine.compare_item(args["text"])
             elif cmd == "explain":
                 result = engine.explain_item(args["text"], args["slot"])
+            elif cmd == "slot_variant":
+                result = engine.slot_variant(args["slot"], args.get("off") or [], args.get("contrib", False))
             elif cmd == "summary":
                 result = {"summary": engine.summary()}
             else:

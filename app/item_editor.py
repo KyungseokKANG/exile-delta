@@ -362,6 +362,16 @@ class ItemEditor(QWidget):
         # 서식 있는 라벨은 마우스 누름을 가로채서 끌기가 안 됨 → 클릭을 머리(드래그 영역)로 통과
         self.title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         hh.addWidget(self.title, 1)
+        # 지금 끼고 있는 장비의 옵션을 끄고 켜보는 창 (옆에 붙어서 뜸)
+        self.equip_btn = QPushButton("장착템 옵션 보기")
+        self.equip_btn.setObjectName("OverlayEdit")
+        self.equip_btn.setCheckable(True)
+        self.equip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.equip_btn.setToolTip("지금 끼고 있는 장비의 옵션을 하나씩 끄고 켜며 DPS · EHP 가 얼마나 바뀌는지 보는 창을 옆에 띄워요")
+        self.equip_btn.toggled.connect(self._toggle_equip)
+        hh.addWidget(self.equip_btn)
+        self.equip_panel = None
+        self._equip_wait = False
         reset = QPushButton("원래대로")
         reset.setObjectName("OverlayEdit")
         reset.clicked.connect(self._reset)
@@ -721,11 +731,59 @@ class ItemEditor(QWidget):
 
     def _compute_original(self) -> None:
         text, _ = compose_en(self.original)
-        self.char_page.compare_for_overlay(text, self._got_original, lambda m: None)
+        self.char_page.compare_for_overlay(text, self._got_original, lambda m: self._got_original({"error": m}))
 
     def _got_original(self, r: dict) -> None:
         self._orig_summary = r
         self._render_orig()
+        if self._equip_wait or (self.equip_panel is not None and self.equip_panel.isVisible()):
+            self._equip_wait = False
+            self._open_equip()
+
+    # ------------------------------------------------------------ 장착템 옵션 창
+    def _equip_slots(self) -> list[dict]:
+        r = self._orig_summary or {}
+        if r.get("error") or r.get("note") == "flask":
+            return []
+        return [s for s in r.get("slots") or [] if s.get("slot")]
+
+    def _toggle_equip(self, on: bool) -> None:
+        if not on:
+            if self.equip_panel is not None:
+                self.equip_panel.hide()
+            self._equip_wait = False
+            return
+        if self._orig_summary is None:
+            self._equip_wait = True  # 원본 비교가 끝나면 (어느 칸과 비교하는지 알아야 함) 열기
+            return
+        self._open_equip()
+
+    def _open_equip(self) -> None:
+        slots = self._equip_slots()
+        if not slots:
+            self.equip_btn.blockSignals(True)
+            self.equip_btn.setChecked(False)
+            self.equip_btn.blockSignals(False)
+            if self.equip_panel is not None:
+                self.equip_panel.hide()
+            self.changes.setText(f"<span style='color:{DIM}; font-size:10pt'>이 아이템은 비교할 장착 칸이 없어서 "
+                                 f"장착템 옵션 창을 열 수 없어요</span>")
+            return
+        if self.equip_panel is None:
+            from equipped_panel import EquippedPanel
+
+            self.equip_panel = EquippedPanel(self)
+        self.equip_panel.open_for(slots)
+
+    def equip_closed(self) -> None:
+        self.equip_btn.blockSignals(True)
+        self.equip_btn.setChecked(False)
+        self.equip_btn.blockSignals(False)
+
+    def moveEvent(self, e):
+        super().moveEvent(e)
+        if self.equip_panel is not None and self.equip_panel.isVisible():
+            self.equip_panel.follow()
 
     def _render_orig(self) -> None:
         r = self._orig_summary
@@ -909,6 +967,10 @@ class ItemEditor(QWidget):
 
     def hideEvent(self, e):
         self._esc_timer.stop()
+        if self.equip_panel is not None:
+            self.equip_panel.hide()
+        self.equip_closed()
+        self._equip_wait = False
         super().hideEvent(e)
 
     def _poll_esc(self) -> None:
