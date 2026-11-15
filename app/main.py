@@ -26,7 +26,7 @@ def main() -> int:
     from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer
     from PySide6.QtGui import QCursor, QGuiApplication, QKeySequence, QShortcut
     from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplication, QComboBox, QFrame, QHBoxLayout,
-                               QLabel, QMenu, QStackedWidget, QVBoxLayout, QWidget)
+                               QLabel, QMenu, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
     from character_page import CharacterPage
     from data import ModDB
@@ -90,6 +90,15 @@ def main() -> int:
             sh.addWidget(self.status_left)
             sh.addStretch(1)
             sh.addWidget(self.app_label)
+            # 새 버전이 있으면 나타나는 버튼 (10분마다 조용히 확인)
+            self.app_up_btn = QPushButton("")
+            self.app_up_btn.setObjectName("Primary")
+            self.app_up_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.app_up_btn.setStyleSheet("padding: 1px 10px; font-size: 9.5pt;")
+            self.app_up_btn.clicked.connect(self._check_app_update)
+            self.app_up_btn.hide()
+            sh.addSpacing(6)
+            sh.addWidget(self.app_up_btn)
             sh.addSpacing(16)
             sh.addWidget(self.engine_label)
             sh.addSpacing(16)
@@ -159,9 +168,30 @@ def main() -> int:
             # (객체를 self 에 붙잡아 둬야 결과 신호를 받기 전에 사라지지 않음)
             self._app_up = app_update.StartupUpdater(self, self._after_app_update)
             QTimer.singleShot(1200, self._app_up.start)
+            self._app_poll = QTimer(self, interval=10 * 60 * 1000, timeout=self._poll_app_update)
+            self._app_poll.start()
             QTimer.singleShot(6000, app_update.mark_ok)  # 창이 뜨고 잘 돌면 '정상 시작' 표시 (로더의 되돌리기 판단용)
 
+        def _poll_app_update(self) -> None:
+            """10분마다: GitHub 에 새 버전이 있으면 아래쪽에 업데이트 버튼만 띄움 (게임 중 방해 안 되게 창은 안 띄움)."""
+            app_update = self._app_update
+            if not app_update.enabled():
+                return
+            from asyncjob import run_async
+
+            def got(inf):
+                what = app_update.decide(inf)
+                if what in ("update", "exe"):
+                    self.app_up_btn.setText(f"v{inf['version']} 업데이트 있어요")
+                    self.app_up_btn.setToolTip("누르면 바뀐 내용 보고 바로 업데이트할 수 있어요")
+                    self.app_up_btn.show()
+                else:
+                    self.app_up_btn.hide()
+
+            run_async(app_update.latest, got, lambda m: None)
+
         def _after_app_update(self) -> None:
+            self._poll_app_update()  # 시작할 때 '나중에'를 눌렀어도 버튼은 보이게
             if self.client.state == "missing" and not getattr(self.char_page, "_installing", False):
                 self.char_page.install_engine()  # 처음 실행: 버튼 누를 필요 없이 바로 PoB 엔진 받기
 

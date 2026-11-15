@@ -294,10 +294,11 @@ class StartupUpdater:
     """시작할 때 한 번: 업데이트 확인 → (처음 실행이면 바로, 아니면 물어보고) 설치 → 재시작.
     끝나면(업데이트 없음 · 나중에 · 실패) after() 호출 — 이어서 PoB 엔진 설치 등."""
 
-    def __init__(self, win, after, manual: bool = False):
+    def __init__(self, win, after, manual: bool = False, direct: bool = False):
         self.win = win
         self.after = after
         self.manual = manual
+        self.direct = direct  # 이미 내역 창에서 '지금 업데이트'를 누름 → 다시 묻지 않음
 
     def start(self) -> None:
         from asyncjob import run_async
@@ -353,7 +354,7 @@ class StartupUpdater:
 
                 webbrowser.open(inf.get("page") or f"https://github.com/{REPO}/releases/latest")
             return self._done()
-        if first and not self.manual:
+        if (first and not self.manual) or self.direct:
             return self._install(inf)  # 처음 실행: 묻지 않고 최신으로
         if self._ask(inf):
             return self._install(inf)
@@ -497,10 +498,22 @@ def show_history(win) -> None:
             info(win, "업데이트 내역", "아직 올라온 릴리스가 없습니다.")
             return
         newest = rels[0]["version"]
+        newer = vt(newest) > vt(VERSION) and enabled()
         head = (f"지금 버전 <b>v{VERSION}</b> · 최신 <b>v{newest}</b>"
-                + (" &nbsp;<span style='color:#7fc46a'>최신 버전입니다</span>" if vt(newest) <= vt(VERSION)
-                   else " &nbsp;<span style='color:#e8c15a'>메뉴 → 프로그램 업데이트 확인으로 받을 수 있습니다</span>"))
-        HistoryDialog(win, "업데이트 내역", head, history_markdown(rels, VERSION)).exec()
+                + (" &nbsp;<span style='color:#e8c15a'>새 버전이 있어요. 아래 '지금 업데이트'로 바로 받을 수 있어요</span>"
+                   if newer else " &nbsp;<span style='color:#7fc46a'>최신 버전입니다</span>"))
+        dlg = HistoryDialog(win, "업데이트 내역", head, history_markdown(rels, VERSION), update=newer)
+        dlg.exec()
+        if newer and dlg.choice == "skip":
+            from storage import load_settings, save_settings
+
+            s = load_settings()
+            s["app_update_skip"] = newest
+            save_settings(s)
+        elif newer and dlg.choice == "update":
+            # (win 에 붙잡아 둬야 결과 신호를 받기 전에 사라지지 않음)
+            win._app_up_manual = StartupUpdater(win, lambda: None, manual=True, direct=True)
+            win._app_up_manual.start()
 
     def fail(msg):
         from dialogs import info
