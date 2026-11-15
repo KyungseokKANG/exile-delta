@@ -311,6 +311,38 @@ def scale_numbers(text: str, s: float) -> str:
     return _VAL_RE.sub(rep, text)
 
 
+QUALITY_LINE_RE = re.compile(r"^(Quality|퀄리티): \+?(\d+)%")
+# 일반 퀄리티가 적용되는 장비(무기·방어구)에만 있는 속성 줄
+QUALITY_PROP_KEYS = ("Physical Damage:", "Attacks per Second:", "Armour:", "Evasion Rating:", "Energy Shield:",
+                     "Ward:", "Chance to Block:", "물리 피해:", "초당 공격 횟수:", "방어도:", "회피:",
+                     "에너지 보호막:", "수호:", "막기 확률:")
+
+
+def get_quality(model: ItemModel) -> int | None:
+    """일반 퀄리티 %. 퀄리티를 받을 수 없는 아이템(장신구·주얼 등)이면 None, 줄이 없으면 0."""
+    for ln in model.head:
+        m = QUALITY_LINE_RE.match(ln)
+        if m:
+            return int(m.group(2))
+    if any(ln.startswith(QUALITY_PROP_KEYS) for ln in model.head):
+        return 0
+    return None
+
+
+def set_quality(model: ItemModel, q: int) -> None:
+    """머리의 퀄리티 줄을 q% 로 바꾼다 (없으면 첫 구분선 뒤에 넣음)."""
+    word = "퀄리티" if model.lang == "ko" else "Quality"
+    line = f"{word}: +{int(q)}%"
+    for i, ln in enumerate(model.head):
+        if QUALITY_LINE_RE.match(ln):
+            model.head[i] = line
+            return
+    if SEP in model.head:
+        model.head.insert(model.head.index(SEP) + 1, line)
+    else:
+        model.head.extend([SEP, line])
+
+
 def compose_en(model: ItemModel, mods: list[Mod] | None = None) -> tuple[str, list[str]]:
     """PoB 에 넘길 영문 텍스트와, 변환하지 못한 옵션 줄 목록."""
     mods = model.mods if mods is None else mods

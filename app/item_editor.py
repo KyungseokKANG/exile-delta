@@ -22,11 +22,12 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from itemmodel import ItemModel, Mod, badge, cat_scalar, compose_en, scale_numbers
+from itemmodel import ItemModel, Mod, badge, cat_scalar, compose_en, get_quality, scale_numbers, set_quality
 from overlay import COL, DIM, SPIN, Overlay
 
 NUM_RE = re.compile(r"\d+(?:\.\d+)?")  # 부호(+/-)는 글자로 남기고 숫자만 입력칸
@@ -379,6 +380,40 @@ class ItemEditor(QWidget):
         hint.setWordWrap(True)
         v.addWidget(hint)
 
+        # 퀄리티 (무기·방어구만): 바꾸면 바로 다시 계산
+        self.q_row = QWidget()
+        qh = QHBoxLayout(self.q_row)
+        qh.setContentsMargins(2, 0, 2, 0)
+        qh.setSpacing(6)
+        qlab = QLabel("퀄리티")
+        qlab.setStyleSheet("color: #c8a96a; font-weight: bold;")
+        qh.addWidget(qlab)
+        self.q_spin = QSpinBox()
+        self.q_spin.setRange(0, 100)
+        self.q_spin.setSuffix(" %")
+        self.q_spin.setFixedWidth(80)
+        self.q_spin.setToolTip("이 아이템 퀄리티를 바꿔서 계산해봐요 (원래 값은 오른쪽에)")
+        self.q_spin.valueChanged.connect(self._quality_changed)
+        qh.addWidget(self.q_spin)
+        self.q_orig = QLabel()
+        self.q_orig.setStyleSheet(f"color: {DIM}; font-size: 10pt;")
+        qh.addWidget(self.q_orig)
+        qh.addStretch(1)
+        for val in (20, 30):
+            b = QPushButton(f"{val}%")
+            b.setObjectName("OverlayEdit")
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda _=False, val=val: self.q_spin.setValue(val))
+            qh.addWidget(b)
+        self.q_back = QPushButton("원래대로")
+        self.q_back.setObjectName("OverlayEdit")
+        self.q_back.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.q_back.clicked.connect(lambda: self.q_spin.setValue(self._q_orig or 0))
+        qh.addWidget(self.q_back)
+        self.q_row.hide()
+        self._q_orig: int | None = None
+        v.addWidget(self.q_row)
+
         # 옵션 목록
         self.list_host = QVBoxLayout()
         self.list_host.setSpacing(4)
@@ -524,6 +559,7 @@ class ItemEditor(QWidget):
                                f" <span style='color:{DIM}'>· {html.escape(name)} · 현재 장착 장비 대비</span>")
         self.add_btn.setEnabled(bool(slot))
         self.orig_label.setText("")
+        self._sync_quality(reset_orig=True)
         self._rebuild_rows()
         self._fit()
         self._compute_original()
@@ -568,7 +604,29 @@ class ItemEditor(QWidget):
 
     def _reset(self) -> None:
         self.model = copy.deepcopy(self.original)
+        self._sync_quality()
         self._rebuild_rows()
+        self._changed()
+
+    def _sync_quality(self, reset_orig: bool = False) -> None:
+        """퀄리티 칸을 지금 아이템 값으로 (무기·방어구가 아니면 숨김)."""
+        q = get_quality(self.model) if self.model is not None else None
+        if reset_orig:
+            self._q_orig = q
+        self.q_row.setVisible(q is not None)
+        if q is None:
+            return
+        self.q_spin.blockSignals(True)
+        self.q_spin.setValue(q)
+        self.q_spin.blockSignals(False)
+        self.q_orig.setText(f"원래 {self._q_orig or 0}%")
+        self.q_back.setEnabled(q != (self._q_orig or 0))
+
+    def _quality_changed(self, q: int) -> None:
+        if self.model is None or get_quality(self.model) is None:
+            return
+        set_quality(self.model, q)
+        self.q_back.setEnabled(q != (self._q_orig or 0))
         self._changed()
 
     def _add_mod(self, text: str, kind: str, en: str = "") -> None:
@@ -707,10 +765,14 @@ class ItemEditor(QWidget):
         off = [m for m in ms if not m.enabled]
         edited = [m for m in ms if not m.added and m.enabled and m.text != m.orig]
         removed = len([m for m in self.original.mods]) - len([m for m in ms if not m.added])
-        if not (added or off or edited or removed):
+        q_now, q_was = get_quality(self.model), get_quality(self.original)
+        q_diff = q_now is not None and q_now != q_was
+        if not (added or off or edited or removed or q_diff):
             self.changes.setText(f"<span style='color:{DIM}; font-size:10pt'>변경 없음 — 원본 아이템 그대로</span>")
             return
         parts = []
+        if q_diff:
+            parts.append(f"<span style='color:{COL['△']}'>퀄리티</span> {q_was or 0}% → {q_now}%")
         if added:
             parts.append(f"<span style='color:{COL['O']}'>추가</span> " + ", ".join(html.escape(m.text) for m in added))
         if edited:
