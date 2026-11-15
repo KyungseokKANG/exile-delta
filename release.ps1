@@ -31,7 +31,19 @@ $app = Join-Path $root "dist\app-$ver.zip"
 $man = Join-Path $root 'dist\manifest.json'
 foreach ($f in @($exe, $app, $man)) { if (-not (Test-Path $f)) { throw "missing $f" } }
 if (Test-Path $full) { Remove-Item $full -Force }
-Compress-Archive -Path $exe -DestinationPath $full
+# the fresh exe is often locked for a while (antivirus scan) -> retry
+$zipped = $false
+for ($i = 1; $i -le 12 -and -not $zipped; $i++) {
+    try {
+        Compress-Archive -Path $exe -DestinationPath $full -ErrorAction Stop
+        $zipped = $true
+    } catch {
+        Write-Host "      exe locked, retry $i/12 ..."
+        if (Test-Path $full) { Remove-Item $full -Force }
+        Start-Sleep -Seconds 5
+    }
+}
+if (-not $zipped) { throw 'could not zip the exe (still locked)' }
 
 gh auth setup-git  # git push uses the gh login
 git add -A

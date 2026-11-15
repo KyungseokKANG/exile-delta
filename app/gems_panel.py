@@ -163,7 +163,11 @@ class GemsCard:
                 tags.append("<span style='color:#c8a96a'>Full DPS</span>")
             if not g.get("enabled", True):
                 tags.append(f"<span style='color:{NEG}'>그룹 꺼짐</span>")
-            title = html.escape(g.get("label") or ", ".join(actives) or "(빈 그룹)")
+            import skillnames
+            from overlay import SLOT_KO
+
+            title = html.escape(skillnames.group_label(g.get("label") or ", ".join(actives)) or "(빈 그룹)")
+            slot_ko = SLOT_KO.get(g.get("slot") or "", g.get("slot") or "")
             # 그룹 머리줄: 주 스킬(라디오) · 제목 · 사용 · Full DPS 포함
             h = QWidget()
             hl = QHBoxLayout(h)
@@ -175,7 +179,7 @@ class GemsCard:
             rb.setToolTip("주 스킬로 선택 (위쪽 DPS 계산 대상)")
             rb.toggled.connect(lambda on, gi=gi: on and self.page._set_main(gi))
             hl.addWidget(rb)
-            tl = QLabel(f"<b>{title}</b> <span style='color:{DIM}'>· {html.escape(g.get('slot') or '아이템/기타')}</span>"
+            tl = QLabel(f"<b>{title}</b> <span style='color:{DIM}'>· {html.escape(slot_ko or '아이템/기타')}</span>"
                         + (" &nbsp;" + " · ".join(tags) if tags else ""))
             tl.setTextFormat(Qt.TextFormat.RichText)
             tl.setObjectName("ConfigSub")

@@ -143,6 +143,31 @@ local STAT_KEYS = {
 	"ReqStr", "ReqDex", "ReqInt",
 }
 
+-- 소환수를 부르는 주 스킬(면죄 · 지배의 일격 · 좀비 등): 소환수 DPS 를 '주 스킬 DPS'(CombinedDPS)에 더할지
+-- (PoB Full DPS 는 원래 소환수 DPS 를 포함. Python 쪽 설정 minion_in_main 으로 켜고 끔)
+es_minion_in_main = true
+
+local function minionDPS(output)
+	local mo = output and output.Minion
+	local v = mo and (mo.CombinedDPS or mo.TotalDPS)
+	if type(v) == "number" and v == v and v > 0 and v < math.huge then return v end
+	return nil
+end
+
+-- CombinedDPS 를 소환수 포함으로 바꾸고, 플레이어 몫(PlayerDPS) · 소환수 몫(MinionDPS) 을 따로 남김
+local function addMinion(t, output)
+	local md = minionDPS(output)
+	if not md then return end
+	t.MinionDPS = md
+	t.PlayerDPS = t.CombinedDPS or 0
+	if es_minion_in_main then t.CombinedDPS = (t.CombinedDPS or 0) + md end
+end
+
+function es_set_minion_in_main(on)
+	es_minion_in_main = on and true or false
+	return es_summary()
+end
+
 local function pickStats(output)
 	local t = { }
 	if not output then return t end
@@ -154,6 +179,7 @@ local function pickStats(output)
 			t[k] = 1e300
 		end
 	end
+	addMinion(t, output)
 	-- RF 처럼 스스로 받는 지속 피해(초당)와 그걸 뺀 순 생명력 재생 (PoB Calcs 의 Net Life Regen)
 	local degen = 0
 	for _, dt in ipairs({ "Physical", "Fire", "Cold", "Lightning", "Chaos" }) do
@@ -177,10 +203,59 @@ function es_new()
 	build = mainObject.main.modes["BUILD"]
 end
 
+-- 바알 젬(바알 면죄 등)은 스킬이 둘(바알 쪽 · 일반 쪽). 계정에서 가져오면 PoB 가 바알 쪽만 켜서(enableGlobal2 없음)
+-- 실제로 피해를 주는 일반 쪽이 Full DPS 에서 빠짐 → 가져온 빌드에선 둘 다 켬 (PoB 에서 젬을 직접 넣을 때와 같음)
+local function enableVaalSecondary()
+	local changed = false
+	for _, g in ipairs(build.skillsTab.socketGroupList) do
+		for _, gem in ipairs(g.gemList or { }) do
+			if gem.gemData and gem.gemData.vaalGem and gem.enableGlobal2 == nil then
+				gem.enableGlobal2 = true
+				changed = true
+			end
+		end
+		if changed then build.skillsTab:ProcessSocketGroup(g) end
+	end
+	if changed then
+		build.modFlag = true
+		build.buildFlag = true
+		frame()
+	end
+end
+
+local function mainDPS()
+	local o = build.calcsTab.mainOutput or { }
+	return (o.CombinedDPS or 0) + (es_minion_in_main and minionDPS(o) or 0)
+end
+
+-- 주 그룹에서 고른 액티브 스킬이 DPS 0 (예: 바알 면죄는 파수꾼을 승천시킬 뿐) 이고 같은 그룹에 다른 액티브가
+-- 있으면 DPS 가 가장 높은 쪽으로 (PoB 사이드바 두 번째 드롭다운)
+local function fixMainActive()
+	local g = build.skillsTab.socketGroupList[build.mainSocketGroup]
+	if not g or not g.displaySkillList or #g.displaySkillList < 2 or mainDPS() > 0 then return end
+	local cur = g.mainActiveSkill or 1
+	local best, bestI = 0, cur
+	for i = 1, #g.displaySkillList do
+		g.mainActiveSkill = i
+		build.modFlag = true
+		build.buildFlag = true
+		frame()
+		local d = mainDPS()
+		if d > best then best, bestI = d, i end
+	end
+	g.mainActiveSkill = bestI
+	build.modFlag = true
+	build.buildFlag = true
+	frame()
+end
+
 function es_load_xml(xmlText, name)
+	-- 예전에 가져와 저장된 빌드: 바알 젬 일반 쪽이 enableGlobal2="nil" 로 저장돼 있음 → 켬
+	xmlText = xmlText:gsub('enableGlobal2="nil"', 'enableGlobal2="true"')
 	mainObject.main:SetMode("BUILD", false, name or "", xmlText)
 	frame()
 	build = mainObject.main.modes["BUILD"]
+	pcall(fixMainActive)
 	return build.buildFlag ~= nil
 end
 
@@ -299,6 +374,7 @@ function es_load_character_json(json, prevXml)
 		local ok, e = pcall(es_apply_prefs, prefs)
 		if not ok then _ES_LOG("apply prefs: " .. tostring(e)) end
 	end
+	pcall(fixMainActive)
 	return true
 end
 
@@ -311,6 +387,7 @@ function es_load_character_json_raw(json)
 	frame()
 	build.importTab:ImportItemsAndSkills(char, true, true, false)
 	frame()
+	pcall(enableVaalSecondary)
 	-- PoB 와 동일: 주 스킬은 PoB 의 GuessMainSocketGroup(젬이 가장 많은 그룹), Full DPS 포함은 비움
 	return true
 end
@@ -337,7 +414,8 @@ function es_pick_best_main_skill()
 			build.modFlag = true
 			build.buildFlag = true
 			frame()
-			local dps = build.calcsTab.mainOutput.CombinedDPS or 0
+			local o = build.calcsTab.mainOutput
+			local dps = (o.CombinedDPS or 0) + (es_minion_in_main and minionDPS(o) or 0)
 			if dps > best then best, bestIdx = dps, i end
 		end
 	end
@@ -360,6 +438,15 @@ function es_summary()
 	out.stats = pickStats(build.calcsTab.mainOutput)
 	local mainSkill = build.calcsTab.mainEnv and build.calcsTab.mainEnv.player and build.calcsTab.mainEnv.player.mainSkill
 	out.mainSkillName = mainSkill and mainSkill.activeEffect and mainSkill.activeEffect.grantedEffect.name or ""
+	-- (바알 젬의 일반 쪽은 계산 단계에서 이름이 변형 젬 이름으로 나올 때가 있어 드롭다운 목록 이름을 우선)
+	local mg = build.skillsTab.socketGroupList[build.mainSocketGroup]
+	local ds = mg and mg.displaySkillList and mg.displaySkillList[mg.mainActiveSkill or 1]
+	if ds and ds.activeEffect and ds.activeEffect.grantedEffect and ds.activeEffect.grantedEffect.name then
+		out.mainSkillName = ds.activeEffect.grantedEffect.name
+	end
+	local menv = build.calcsTab.mainEnv
+	out.minionName = menv and menv.minion and menv.minion.minionData and menv.minion.minionData.name or nil
+	out.minionInMain = es_minion_in_main
 	out.groups = { }
 	for i, group in ipairs(build.skillsTab.socketGroupList) do
 		local gems = { }
@@ -399,6 +486,33 @@ function es_summary()
 	if ms and ms.activeEffect and ms.activeEffect.grantedEffect.parts then
 		for j, p in ipairs(ms.activeEffect.grantedEffect.parts) do out.skillParts[j] = p.name or ("Part " .. j) end
 		out.skillPart = (ms.activeEffect.srcInstance and ms.activeEffect.srcInstance.skillPart) or 1
+	end
+	-- 바알 면죄 · 바알 지배: '바알 쪽 = 승천한 파수꾼' 으로 보여주기 위한 정보 (아래쪽에 정의된 전역 함수)
+	if es_ascend_info then
+		local ok, a = pcall(es_ascend_info)
+		if ok then out.ascend = a end
+	end
+	-- 소환수 / 소환수 스킬 (PoB 사이드바 Minion · Minion skill 드롭다운과 같은 목록)
+	out.minions = { }
+	out.minionSel = 0
+	out.minionSkills = { }
+	out.minionSkillSel = 0
+	if ms and ms.activeEffect and ms.skillFlags and not ms.skillFlags.disable
+		and (ms.activeEffect.grantedEffect.minionList or (ms.minionList and ms.minionList[1])) then
+		local src = ms.activeEffect.srcInstance or { }
+		if not ms.activeEffect.grantedEffect.minionHasItemSet then
+			for j, id in ipairs(ms.minionList or { }) do
+				out.minions[j] = data.minions[id] and data.minions[id].name or id
+				if id == src.skillMinion then out.minionSel = j end
+			end
+			if out.minionSel == 0 and #out.minions > 0 then out.minionSel = 1 end
+		end
+		if ms.minion and ms.minion.activeSkillList then
+			for j, sk in ipairs(ms.minion.activeSkillList) do
+				out.minionSkills[j] = sk.activeEffect.grantedEffect.name
+			end
+			out.minionSkillSel = src.skillMinionSkill or 1
+		end
 	end
 	out.pobVersion = mainObject.versionNumber or "?"
 	-- 플라스크 활성 여부 (PoB Items 탭의 체크박스)
@@ -583,11 +697,92 @@ function es_set_skill_part(part)
 	return true
 end
 
+-- 주 스킬의 소환수 / 소환수 스킬 선택 (PoB 사이드바와 같은 값: srcInstance.skillMinion / skillMinionSkill)
+local function mainSrc()
+	local g = build.skillsTab.socketGroupList[build.mainSocketGroup]
+	local ms = g and g.displaySkillList and g.displaySkillList[g.mainActiveSkill or 1]
+	return ms, ms and ms.activeEffect and ms.activeEffect.srcInstance
+end
+
+-- 바알 면죄 · 바알 지배: 바알 쪽은 PoB 에서 피해 0 (파수꾼 승천만), 승천한 파수꾼은 일반 쪽 소환수 목록에 있음.
+-- → 앱에서는 '바알 면죄' = 일반 면죄 + 승천한 파수꾼, '면죄' = 일반 면죄 + 일반 파수꾼 으로 보여줌.
+-- 반환: { vaal = 바알 쪽 순번, normal = 일반 쪽 순번, asc = 승천 소환수 id, base = 일반 소환수 id } 또는 nil
+local function ascendPair(g)
+	if not g or not g.displaySkillList then return nil end
+	local vaalI, normI, ascId, baseId
+	for i, sk in ipairs(g.displaySkillList) do
+		local ge = sk.activeEffect and sk.activeEffect.grantedEffect
+		if ge then
+			local asc, base
+			for _, id in ipairs(sk.minionList or { }) do
+				local m = data.minions[id]
+				if m and m.name:match("^Ascended ") then asc = id elseif not base then base = id end
+			end
+			if asc and base then
+				normI, ascId, baseId = i, asc, base
+			elseif ge.skillTypes and ge.skillTypes[SkillType.Vaal] and not ge.minionList then
+				vaalI = i
+			end
+		end
+	end
+	if vaalI and normI then return { vaal = vaalI, normal = normI, asc = ascId, base = baseId } end
+	return nil
+end
+
+-- es_summary 에서 부름: { vaal, normal, on = 지금 승천 파수꾼인지 }
+function es_ascend_info()
+	local g = build.skillsTab.socketGroupList[build.mainSocketGroup]
+	local p = ascendPair(g)
+	if not p then return nil end
+	local src = g.displaySkillList[p.normal].activeEffect.srcInstance or { }
+	return { vaal = p.vaal, normal = p.normal, on = (src.skillMinion == p.asc) and (g.mainActiveSkill or 1) ~= p.vaal }
+end
+
+function es_set_ascend(on)
+	local g = build.skillsTab.socketGroupList[build.mainSocketGroup]
+	local p = ascendPair(g)
+	if p then
+		g.mainActiveSkill = p.normal
+		local src = g.displaySkillList[p.normal].activeEffect.srcInstance
+		local want = on and p.asc or p.base
+		if src.skillMinion ~= want then src.skillMinionSkill = nil end
+		src.skillMinion = want
+		build.modFlag = true
+		build.buildFlag = true
+		frame()
+	end
+	return es_summary()
+end
+
+function es_set_minion(j)
+	local ms, src = mainSrc()
+	if ms and src and ms.minionList and ms.minionList[j] then
+		if src.skillMinion ~= ms.minionList[j] then src.skillMinionSkill = nil end  -- 소환수가 바뀌면 스킬 목록도 바뀜
+		src.skillMinion = ms.minionList[j]
+		build.modFlag = true
+		build.buildFlag = true
+		frame()
+	end
+	return es_summary()
+end
+
+function es_set_minion_skill(j)
+	local _, src = mainSrc()
+	if src then
+		src.skillMinionSkill = j
+		build.modFlag = true
+		build.buildFlag = true
+		frame()
+	end
+	return es_summary()
+end
+
 function es_set_main_group(i)
 	build.mainSocketGroup = i
 	build.modFlag = true
 	build.buildFlag = true
 	frame()
+	pcall(fixMainActive)  -- 바알 면죄처럼 고른 쪽이 DPS 0 이면 같은 젬의 다른 스킬로
 end
 
 function es_set_group(i, enabled, includeInFullDPS)
@@ -1749,6 +1944,10 @@ local function explainPick(o)
 	for _, k in ipairs(EXPLAIN_KEYS) do
 		local v = o and o[k]
 		if type(v) == "number" and v == v then t[k] = (v == math.huge) and 1e300 or v end
+	end
+	if es_minion_in_main then
+		local md = minionDPS(o)
+		if md then t.CombinedDPS = (t.CombinedDPS or 0) + md end
 	end
 	return t
 end

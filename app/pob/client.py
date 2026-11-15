@@ -75,7 +75,13 @@ class PobClient(QObject):
         self._proc.finished.connect(self._on_exit)
         self._proc.start(prog, args + ["--pob-worker", str(self._server.serverPort()), str(self.log_path)])
         self._set_state("starting", f"PoB {self.version} 엔진 시작 중…")
-        self._init_args = {"src": str(src), "user": str(installer.USER_DIR)}
+        try:
+            from storage import load_settings
+
+            minion = bool(load_settings().get("minion_in_main", True))
+        except Exception:  # noqa: BLE001
+            minion = True
+        self._init_args = {"src": str(src), "user": str(installer.USER_DIR), "minion_in_main": minion}
 
     def stop(self) -> None:
         if self._sock is not None:

@@ -293,24 +293,38 @@ class CharacterPage(QWidget):
         mm.addAction("이 캐릭터 삭제", lambda: self.delete_char(self.strip.tabs.currentIndex()))
         more.setMenu(mm)
         more.setStyleSheet("QPushButton::menu-indicator { image: none; width: 0; }")
-        # 주 스킬 선택 (스킬 · 젬 탭에서도 바꿀 수 있음) — 이름 옆 한 줄에
+        # 주 스킬 선택 (스킬 · 젬 탭에서도 바꿀 수 있음) — DPS 칸 아래 한 줄에, 칸마다 이름표
         self.main_combo = QComboBox()
-        self.main_combo.setToolTip("주 스킬: DPS 를 계산할 스킬 (PoB 사이드바의 첫 번째 드롭다운)")
+        self.main_combo.setToolTip("DPS 를 계산할 스킬 그룹 (PoB 사이드바의 첫 번째 드롭다운)")
         self.main_combo.activated.connect(lambda i: self._set_main(self.main_combo.itemData(i)))
         self.main_combo.setMinimumWidth(160)
         self.main_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.main_combo.setMinimumContentsLength(14)
-        hh.addWidget(self.main_combo, 3, Qt.AlignmentFlag.AlignVCenter)
         self.active_combo = QComboBox()
         self.active_combo.setToolTip("주 그룹 안의 액티브 스킬 (PoB 사이드바의 두 번째 드롭다운)")
         self.active_combo.activated.connect(self._on_active_combo)
         self.part_combo = QComboBox()
         self.part_combo.setToolTip("스킬 파트 (PoB 사이드바의 세 번째 드롭다운)")
         self.part_combo.activated.connect(lambda i: self._call("set_skill_part", {"part": i + 1}, "스킬 파트 변경됨"))
-        for cb in (self.active_combo, self.part_combo):
+        # 소환수 / 소환수 스킬 (PoB 사이드바와 같음, 소환수가 나오는 주 스킬일 때만 보임)
+        self.minion_combo = QComboBox()
+        self.minion_combo.setToolTip("소환수 (PoB 사이드바의 Minion)\n예: 면죄는 일반 파수꾼 / 바알 면죄로 승천한 파수꾼")
+        self.minion_combo.activated.connect(lambda i: self._call("set_minion", {"index": i + 1}, "소환수 변경됨"))
+        self.minion_skill_combo = QComboBox()
+        self.minion_skill_combo.setToolTip("소환수가 쓰는 스킬 (PoB 사이드바의 Minion skill)")
+        self.minion_skill_combo.activated.connect(
+            lambda i: self._call("set_minion_skill", {"index": i + 1}, "소환수 스킬 변경됨"))
+        for cb in (self.active_combo, self.part_combo, self.minion_combo, self.minion_skill_combo):
             cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-            cb.setMinimumContentsLength(8)
-            hh.addWidget(cb, 1, Qt.AlignmentFlag.AlignVCenter)
+            cb.setMinimumContentsLength(10)
+        # 소환수가 나오는 주 스킬(면죄 등)일 때만 보임. 기본 체크
+        self.minion_chk = QCheckBox("소환수 DPS 포함")
+        self.minion_chk.setToolTip("면죄 · 지배의 일격처럼 소환수가 나오는 스킬은\n"
+                                   "소환수 DPS 까지 더해서 주 스킬 DPS 로 보여주고, 장비 비교도 그 기준으로 해요")
+        self.minion_chk.setChecked(bool(load_settings().get("minion_in_main", True)))
+        self.minion_chk.toggled.connect(self._set_minion_in_main)
+        self.minion_chk.hide()
+        hh.addStretch(1)
         self.auto_chk = QCheckBox("1분마다 갱신")
         self.auto_chk.setToolTip("체크하면 1분마다 계정에서 최신 레벨·장비·트리를 자동으로 다시 받아옵니다.\n"
                                  "바뀐 게 없으면 다시 계산하지 않고, 앱에서 직접 수정한 빌드는 덮어쓰지 않습니다.")
@@ -333,6 +347,7 @@ class CharacterPage(QWidget):
         self.tiles = {
             "FullDPS": StatTile("Full DPS", "#ead197"),
             "CombinedDPS": StatTile("주 스킬 DPS", "#ead197"),
+            "MinionDPS": StatTile("소환수 DPS", "#c9a6e8"),
             "TotalDPS": StatTile("Hit DPS", "#ead197"),
             "TotalEHP": StatTile("유효 체력 (EHP)", "#8fd0ff"),
             "Life": StatTile("생명력", "#e07a6a"),
@@ -346,6 +361,40 @@ class CharacterPage(QWidget):
         for t in self.tiles.values():
             grid.addWidget(t, 1)
         hv.addLayout(grid)
+
+        # 계산 기준 스킬 줄: 칸 위에 이름표 (해당 없는 칸은 숨김)
+        sk_row = QHBoxLayout()
+        sk_row.setSpacing(10)
+        self._skill_fields: dict = {}
+
+        def field(caption: str, w, stretch: int, tip: str) -> None:
+            box = QWidget()
+            bv = QVBoxLayout(box)
+            bv.setContentsMargins(0, 0, 0, 0)
+            bv.setSpacing(2)
+            cap = QLabel(caption)
+            cap.setStyleSheet("color: #8a8170; font-size: 8.5pt;")
+            cap.setToolTip(tip)
+            bv.addWidget(cap)
+            bv.addWidget(w)
+            sk_row.addWidget(box, stretch)
+            self._skill_fields[w] = box
+
+        field("계산할 스킬 그룹", self.main_combo, 3, "DPS 를 계산할 스킬 그룹 (PoB 사이드바 첫 번째 칸)")
+        field("그룹 안의 스킬", self.active_combo, 2,
+              "그룹 안에 스킬이 여럿일 때 (예: 바알 젬은 바알 쪽 / 일반 쪽)")
+        field("스킬 파트", self.part_combo, 2, "스킬의 어느 부분을 계산할지 (예: 투사체 전부 / 하나)")
+        field("소환수", self.minion_combo, 2, "계산할 소환수 (예: 면죄는 일반 파수꾼 / 승천한 파수꾼)")
+        field("소환수가 쓰는 스킬", self.minion_skill_combo, 2,
+              "소환수가 이 스킬만 계속 쓴다고 보고 계산해요 (PoB 와 같음)")
+        for w in (self.active_combo, self.part_combo, self.minion_combo, self.minion_skill_combo):
+            self._skill_fields[w].hide()  # 계산 결과가 오면 _render_skills 가 필요한 칸만 보이게
+        chk_box = QVBoxLayout()
+        chk_box.addStretch(1)
+        chk_box.addWidget(self.minion_chk)
+        sk_row.addLayout(chk_box)
+        sk_row.addStretch(1)
+        hv.addLayout(sk_row)
         self.res_label = QLabel()
         self.res_label.setObjectName("DefLine")
         self.res_label.setTextFormat(Qt.TextFormat.RichText)
@@ -1056,13 +1105,40 @@ class CharacterPage(QWidget):
         head = f"Lv {s.get('level', '?')}  ·  {html.escape(cls_txt)}" if s else "PoB 엔진 대기 중…"
         self.c_sub.setText(f"{head} &nbsp;<span style='color:#62594d; font-size:8.5pt'>{html.escape(src_txt)}</span>")
 
-        main_name = s.get("mainSkillName") or ""
+        import skillnames
+
+        en_main = s.get("mainSkillName") or ""
+        if (s.get("ascend") or {}).get("on"):  # 바알 면죄(승천한 파수꾼) 로 계산 중
+            en_main = "Vaal " + en_main if skillnames.ko("Vaal " + en_main) != "Vaal " + en_main else en_main
+        main_name = skillnames.ko(en_main)
         n_full = sum(1 for g in (s.get("groups") or []) if g.get("includeInFullDPS"))
         for k, tile in self.tiles.items():
             v = st.get(k)
             sub = ""
             if k == "CombinedDPS":
                 sub = main_name
+                md = st.get("MinionDPS")
+                self.minion_chk.setVisible(bool(md))
+                if md:  # 소환수를 부르는 주 스킬 (면죄 등)
+                    mname = skillnames.ko(s.get("minionName") or "") or "소환수"
+                    if s.get("minionInMain", True):
+                        sub = f"{main_name} + 소환수"
+                        tile.setToolTip(f"주 스킬 DPS = 스킬 {fmt_big(st.get('PlayerDPS'))} + {mname} {fmt_big(md)}\n"
+                                        "위쪽 '소환수 DPS 포함' 체크를 끄면 스킬 DPS 만 봐요")
+                    else:
+                        tile.setToolTip(f"소환수({mname}) DPS {fmt_big(md)} 는 빠져 있어요\n"
+                                        "위쪽 '소환수 DPS 포함' 체크를 켜면 더해져요")
+                else:
+                    tile.setToolTip("Combined DPS: 주 스킬의 타격 + 도트·점화·중독 합")
+            elif k == "MinionDPS":
+                # 소환수가 나오는 주 스킬일 때만: 고른 소환수 · 소환수 스킬 기준
+                tile.setVisible(bool(v))
+                ms, mk = s.get("minions") or [], s.get("minionSkills") or []
+                mn = ms[s["minionSel"] - 1] if 0 < int(s.get("minionSel") or 0) <= len(ms) else (s.get("minionName") or "")
+                sk = mk[s["minionSkillSel"] - 1] if 0 < int(s.get("minionSkillSel") or 0) <= len(mk) else ""
+                mn, sk = skillnames.ko(mn), skillnames.ko(sk)
+                sub = sk or mn  # 소환수 이름은 위 드롭다운에 보이니 칸에는 스킬만 (길어서 잘림)
+                tile.setToolTip(f"{' · '.join(x for x in (mn, sk) if x)} 기준 DPS\n위쪽 드롭다운에서 소환수 · 소환수 스킬을 바꿀 수 있어요")
             elif k == "TotalDPS":
                 sub = "도트·점화·중독 제외"
             elif k == "FullDPS":
@@ -1336,6 +1412,9 @@ class CharacterPage(QWidget):
 
     def _render_skills(self, s: dict) -> None:
         """위쪽 '주 스킬' 선택 줄 (그룹 사용·Full DPS 체크는 '스킬 · 젬' 탭)."""
+        import skillnames
+        from overlay import SLOT_KO
+
         groups = s.get("groups") or []
         main = s.get("mainSocketGroup")
         ready = self.client.state == "ready"
@@ -1347,7 +1426,9 @@ class CharacterPage(QWidget):
             if not label or label.startswith("<No active"):
                 continue
             off = "" if g.get("enabled", True) else "  (꺼짐)"
-            self.main_combo.addItem(f"{label}  ·  {g.get('slot') or '아이템/기타'}{off}", i)
+            slot = g.get("slot") or ""
+            self.main_combo.addItem(f"{skillnames.group_label(label)}  ·  {SLOT_KO.get(slot, slot) or '아이템/기타'}{off}", i)
+            self.main_combo.setItemData(self.main_combo.count() - 1, f"{label} · {slot}", Qt.ItemDataRole.ToolTipRole)
             if i == main:
                 cur = self.main_combo.count() - 1
         self.main_combo.setCurrentIndex(cur)
@@ -1355,16 +1436,41 @@ class CharacterPage(QWidget):
         mg = groups[main - 1] if isinstance(main, int) and 0 < main <= len(groups) else {}
         actives = mg.get("actives") or []
         self.active_combo.clear()
-        self.active_combo.addItems(actives)
-        self.active_combo.setCurrentIndex(int(mg.get("mainActiveSkill") or 1) - 1)
-        self.active_combo.setVisible(len(actives) > 1)
+        asc = s.get("ascend") or None  # 바알 면죄 · 바알 지배: 바알 쪽 = 승천한 파수꾼
+        for j, a in enumerate(actives):
+            label = skillnames.skill_label(a)
+            tip = a + ("\n바알 영혼을 모아 쓰는 스킬이에요" if skillnames.is_vaal(a) else "")
+            if asc and j + 1 == asc.get("vaal"):
+                label = f"{skillnames.ko(a)}  (승천한 파수꾼)"
+                tip = a + "\n파수꾼을 승천시키는 바알 스킬이에요. 승천한 파수꾼 기준으로 계산해요 (떠 있는 20초 동안)"
+            elif asc and j + 1 == asc.get("normal"):
+                label = f"{skillnames.ko(a)}  (일반 파수꾼)"
+                tip = a + "\n평소에 떠 있는 일반 파수꾼 기준으로 계산해요"
+            self.active_combo.addItem(label)
+            self.active_combo.setItemData(j, tip, Qt.ItemDataRole.ToolTipRole)
+        cur_active = int(mg.get("mainActiveSkill") or 1)
+        if asc:
+            cur_active = asc["vaal"] if asc.get("on") else asc["normal"]
+        self.active_combo.setCurrentIndex(cur_active - 1)
+        self._skill_fields[self.active_combo].setVisible(len(actives) > 1)
         self.active_combo.setEnabled(ready)
         parts = s.get("skillParts") or []
         self.part_combo.clear()
         self.part_combo.addItems(parts)
         self.part_combo.setCurrentIndex(int(s.get("skillPart") or 1) - 1)
-        self.part_combo.setVisible(len(parts) > 1)
+        self._skill_fields[self.part_combo].setVisible(len(parts) > 1)
         self.part_combo.setEnabled(ready)
+        for cb, items, sel in ((self.minion_combo, s.get("minions") or [], s.get("minionSel")),
+                               (self.minion_skill_combo, s.get("minionSkills") or [], s.get("minionSkillSel"))):
+            cb.clear()
+            for j, it in enumerate(items):
+                cb.addItem(skillnames.ko(it))
+                cb.setItemData(j, it, Qt.ItemDataRole.ToolTipRole)
+            cb.setCurrentIndex(max(0, min(int(sel or 1), len(items)) - 1))
+            self._skill_fields[cb].setVisible(len(items) > 0)
+            cb.setEnabled(ready and len(items) > 1)
+        if asc:  # 일반 / 승천 파수꾼은 '그룹 안의 스킬' 에서 고르니 소환수 칸은 숨김
+            self._skill_fields[self.minion_combo].hide()
     # ================================================================ 조작
     def _set_main(self, i) -> None:
         c = self._cur()
@@ -1378,8 +1484,21 @@ class CharacterPage(QWidget):
             self._ensure_loaded()
             self.client.call(cmd, args, lambda r: self._apply_result(c["id"], r, msg), self._on_call_err)
 
+    def _set_minion_in_main(self, on: bool) -> None:
+        s = load_settings()
+        s["minion_in_main"] = bool(on)
+        save_settings(s)
+        if self.client.state == "ready":
+            self._call("set_minion_in_main", {"on": bool(on)},
+                       "주 스킬 DPS에 소환수 포함" if on else "주 스킬 DPS에서 소환수 뺌")
+
     def _on_active_combo(self, i: int) -> None:
         s = (self._cur() or {}).get("summary") or {}
+        asc = s.get("ascend")
+        if asc and i + 1 in (asc.get("vaal"), asc.get("normal")):
+            on = i + 1 == asc.get("vaal")
+            self._call("set_ascend", {"on": on}, "승천한 파수꾼으로 계산" if on else "일반 파수꾼으로 계산")
+            return
         if s.get("mainSocketGroup"):
             self._call("set_active_skill", {"group": s["mainSocketGroup"], "active": i + 1}, "액티브 스킬 변경됨")
 

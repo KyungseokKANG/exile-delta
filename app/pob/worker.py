@@ -43,7 +43,15 @@ def run(port: int, log_path: Path) -> int:
                 from pob.engine import PobEngine
 
                 engine = PobEngine(Path(args["src"]), Path(args["user"]), log=log)
+                engine.g.es_minion_in_main = bool(args.get("minion_in_main", True))
                 result = {"ok": True}
+            elif cmd == "set_ascend" and engine is not None:
+                result = {"summary": engine.set_ascend(bool(args.get("on"))), "xml": engine.save_xml()}
+            elif cmd in ("set_minion", "set_minion_skill") and engine is not None:
+                fn = engine.set_minion if cmd == "set_minion" else engine.set_minion_skill
+                result = {"summary": fn(int(args["index"])), "xml": engine.save_xml()}
+            elif cmd == "set_minion_in_main" and engine is not None:
+                result = {"summary": engine.set_minion_in_main(args.get("on", True)), "xml": engine.save_xml()}
             elif engine is None:
                 raise RuntimeError("engine not initialised")
             elif cmd == "load_xml":

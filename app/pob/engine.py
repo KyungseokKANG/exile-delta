@@ -184,6 +184,18 @@ class PobEngine:
     def tree_import_url(self, url: str) -> dict:
         return _to_py(self.g.es_tree_import_url(url.strip().encode("utf-8")))
 
+    def set_ascend(self, on: bool) -> dict:
+        return _to_py(self.g.es_set_ascend(bool(on)))
+
+    def set_minion(self, index: int) -> dict:
+        return _to_py(self.g.es_set_minion(int(index)))
+
+    def set_minion_skill(self, index: int) -> dict:
+        return _to_py(self.g.es_set_minion_skill(int(index)))
+
+    def set_minion_in_main(self, on: bool) -> dict:
+        return _to_py(self.g.es_set_minion_in_main(bool(on)))
+
     def compare_item(self, item_text: str) -> dict:
         return _to_py(self.g.es_compare_item(item_text.encode("utf-8")))
 
