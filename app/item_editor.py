@@ -424,6 +424,21 @@ class ItemEditor(QWidget):
         self._q_orig: int | None = None
         v.addWidget(self.q_row)
 
+        # 고유 방어 (방어구만): 체크를 끄면 이 장비의 방어도/회피/보호막 몫(+수치 · % 증가 · 퀄리티 포함)을 통째로 빼고 계산
+        self.def_row = QWidget()
+        self.def_h = QHBoxLayout(self.def_row)
+        self.def_h.setContentsMargins(2, 0, 2, 0)
+        self.def_h.setSpacing(12)
+        dlab = QLabel("고유 방어")
+        dlab.setStyleSheet("color: #c8a96a; font-weight: bold;")
+        dlab.setToolTip("체크를 끄면 이 장비의 그 방어력을 통째로 빼고 계산해요.\n"
+                        "이 장비에 붙은 +수치, % 증가, 퀄리티도 같이 빠져요.")
+        self.def_h.addWidget(dlab)
+        self.def_row.hide()
+        v.addWidget(self.def_row)
+        self.nodef: set[str] = set()
+        self._def_chk: dict[str, QCheckBox] = {}
+
         # 옵션 목록
         self.list_host = QVBoxLayout()
         self.list_host.setSpacing(4)
@@ -569,6 +584,8 @@ class ItemEditor(QWidget):
                                f" <span style='color:{DIM}'>· {html.escape(name)} · 현재 장착 장비 대비</span>")
         self.add_btn.setEnabled(bool(slot))
         self.orig_label.setText("")
+        self.nodef = set()
+        self._sync_def(None)
         self._sync_quality(reset_orig=True)
         self._rebuild_rows()
         self._fit()
@@ -614,6 +631,11 @@ class ItemEditor(QWidget):
 
     def _reset(self) -> None:
         self.model = copy.deepcopy(self.original)
+        self.nodef = set()
+        for k, c in self._def_chk.items():
+            c.blockSignals(True)
+            c.setChecked(True)
+            c.blockSignals(False)
         self._sync_quality()
         self._rebuild_rows()
         self._changed()
@@ -631,6 +653,48 @@ class ItemEditor(QWidget):
         self.q_spin.blockSignals(False)
         self.q_orig.setText(f"원래 {self._q_orig or 0}%")
         self.q_back.setEnabled(q != (self._q_orig or 0))
+
+    DEF_KO = {"Armour": "방어도", "Evasion": "회피", "EnergyShield": "에너지 보호막", "Ward": "수호"}
+
+    def _sync_def(self, defs: dict | None) -> None:
+        """계산 결과의 고유 방어력(끄기 전 값)으로 체크 칸 갱신. 방어구가 아니면 숨김."""
+        defs = defs or {}
+        keys = [k for k in ("Armour", "Evasion", "EnergyShield", "Ward") if defs.get(k)]
+        def clear():
+            while self.def_h.count() > 1:  # 맨 앞 '고유 방어' 이름표만 남김
+                it = self.def_h.takeAt(1)
+                if it.widget():
+                    it.widget().hide()
+                    it.widget().deleteLater()
+            self._def_chk = {}
+
+        if not keys:
+            # 계산 중 잠깐 비는 경우엔 그대로 두고, 새 아이템(load)일 때만 숨김
+            if not self.nodef:
+                self.def_row.hide()
+                clear()
+            return
+        if sorted(self._def_chk) != sorted(keys):
+            clear()
+            for k in keys:
+                c = QCheckBox()
+                c.setChecked(k not in self.nodef)
+                c.setCursor(Qt.CursorShape.PointingHandCursor)
+                c.setToolTip(f"끄면 이 장비의 {self.DEF_KO[k]}(+수치 · % 증가 · 퀄리티 포함)를 통째로 빼고 계산해요")
+                c.toggled.connect(lambda on, k=k: self._def_toggled(k, on))
+                self._def_chk[k] = c
+                self.def_h.addWidget(c)
+            self.def_h.addStretch(1)
+        for k in keys:
+            self._def_chk[k].setText(f"{self.DEF_KO[k]} {defs[k]:,.0f}")
+        self.def_row.show()
+
+    def _def_toggled(self, k: str, on: bool) -> None:
+        if on:
+            self.nodef.discard(k)
+        else:
+            self.nodef.add(k)
+        self._changed()
 
     def _quality_changed(self, q: int) -> None:
         if self.model is None or get_quality(self.model) is None:
@@ -825,10 +889,13 @@ class ItemEditor(QWidget):
         removed = len([m for m in self.original.mods]) - len([m for m in ms if not m.added])
         q_now, q_was = get_quality(self.model), get_quality(self.original)
         q_diff = q_now is not None and q_now != q_was
-        if not (added or off or edited or removed or q_diff):
+        if not (added or off or edited or removed or q_diff or self.nodef):
             self.changes.setText(f"<span style='color:{DIM}; font-size:10pt'>변경 없음 — 원본 아이템 그대로</span>")
             return
         parts = []
+        if self.nodef:
+            parts.append(f"<span style='color:{COL['X']}'>고유 방어 끔</span> "
+                         + ", ".join(self.DEF_KO.get(k, k) for k in sorted(self.nodef)))
         if q_diff:
             parts.append(f"<span style='color:{COL['△']}'>퀄리티</span> {q_was or 0}% → {q_now}%")
         if added:
@@ -855,7 +922,7 @@ class ItemEditor(QWidget):
         self.why_btn.hide()
         self.why_label.hide()
         started = self.char_page.compare_for_overlay(
-            text, lambda r, t=tok: self._show(t, r), lambda m, t=tok: self._show(t, None, m))
+            text, lambda r, t=tok: self._show(t, r), lambda m, t=tok: self._show(t, None, m), nodef=sorted(self.nodef))
         if not started:
             self.result.setText(f"<span style='color:{DIM}'>캐릭터 탭에서 캐릭터를 등록하고 PoB 엔진이 실행 중이어야 합니다.</span>")
             return
@@ -885,6 +952,7 @@ class ItemEditor(QWidget):
                 self.result.setText(f"<span style='color:{COL['X']}'>계산 실패: {html.escape(err)}</span>")
             else:
                 self.result.setText(Overlay._pob_html(r or {}))
+                self._sync_def((r or {}).get("defences"))
                 self._start_why(tok, r or {})
         except Exception as e:  # noqa: BLE001 — '계산 중' 에 멈춰 있지 않도록
             self.result.setText(f"<span style='color:{COL['X']}'>결과 표시 실패: {html.escape(str(e))}</span>")

@@ -128,11 +128,12 @@ def run(port: int, log_path: Path) -> int:
                     raise RuntimeError(r["error"])
                 result = {"summary": engine.summary(), "xml": engine.save_xml(), "state": engine.tree_state()}
             elif cmd == "compare":
-                result = engine.compare_item(args["text"])
+                result = engine.compare_item(args["text"], args.get("nodef"))
             elif cmd == "explain":
                 result = engine.explain_item(args["text"], args["slot"])
             elif cmd == "slot_variant":
-                result = engine.slot_variant(args["slot"], args.get("off") or [], args.get("contrib", False))
+                result = engine.slot_variant(args["slot"], args.get("off") or [], args.get("contrib", False),
+                                             args.get("nodef"))
             elif cmd == "summary":
                 result = {"summary": engine.summary()}
             else:

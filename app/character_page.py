@@ -1541,7 +1541,7 @@ class CharacterPage(QWidget):
             self.client.call("set_group", {"index": i, "enabled": enabled, "full_dps": full_dps},
                              lambda r: self._apply_result(c["id"], r, "스킬 설정 변경됨"), self._on_call_err)
 
-    def compare_for_overlay(self, text: str, ok, err) -> str | None:
+    def compare_for_overlay(self, text: str, ok, err, nodef: list | None = None) -> str | None:
         """오버레이용: 현재 캐릭터로 아이템 비교. 비교할 수 없으면 None, 시작했으면 캐릭터 이름."""
         c = self._cur()
         if c is None or self.client.state not in ("ready", "starting"):
@@ -1556,7 +1556,7 @@ class CharacterPage(QWidget):
             self.loaded_id = c["id"]
             self.client.call("load_xml", {"xml": xml, "name": c["name"]},
                              lambda r: self._apply_result(c["id"], r, record=False), self._on_call_err)
-        self.client.call("compare", {"text": text}, ok, err)
+        self.client.call("compare", {"text": text, "nodef": list(nodef or [])}, ok, err)
         return c["name"]
 
     # ================================================================ 메뉴

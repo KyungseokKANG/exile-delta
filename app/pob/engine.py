@@ -196,15 +196,17 @@ class PobEngine:
     def set_minion_in_main(self, on: bool) -> dict:
         return _to_py(self.g.es_set_minion_in_main(bool(on)))
 
-    def compare_item(self, item_text: str) -> dict:
-        return _to_py(self.g.es_compare_item(item_text.encode("utf-8")))
+    def compare_item(self, item_text: str, nodef: list | None = None) -> dict:
+        """nodef: 끈 고유 방어력 ['EnergyShield', 'Armour', …] (그 장비 몫을 0 으로)."""
+        return _to_py(self.g.es_compare_item(item_text.encode("utf-8"), ",".join(nodef or []).encode("utf-8")))
 
     def explain_item(self, item_text: str, slot: str) -> dict:
         """옵션 줄마다 DPS/EHP 기여도 (새 아이템 줄 / 지금 장비 줄)."""
         return _to_py(self.g.es_explain_item(item_text.encode("utf-8"), slot.encode("utf-8")))
 
-    def slot_variant(self, slot: str, off: list, contrib: bool = False) -> dict:
-        """지금 장착한 아이템에서 off 줄([[목록 이름, 번호], …])을 뺐을 때 계산 결과 + 줄 목록.
-        contrib: 줄마다 그 줄만 뺐을 때 잃는 양(d)도."""
+    def slot_variant(self, slot: str, off: list, contrib: bool = False, nodef: list | None = None) -> dict:
+        """지금 장착한 아이템에서 off 줄([[목록 이름, 번호], …])을 빼고 nodef 고유 방어력을 끈 계산 결과 + 줄 목록.
+        contrib: 줄마다(고유 방어력도) 그것만 뺐을 때 잃는 양(d)도."""
         spec = ",".join(f"{a}:{int(b)}" for a, b in off)
-        return _to_py(self.g.es_slot_variant(slot.encode("utf-8"), spec.encode("utf-8"), bool(contrib)))
+        return _to_py(self.g.es_slot_variant(slot.encode("utf-8"), spec.encode("utf-8"), bool(contrib),
+                                             ",".join(nodef or []).encode("utf-8")))

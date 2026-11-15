@@ -1843,17 +1843,53 @@ function es_gem_impact(skip, limit)
 	return res
 end
 
+-- 방어구 고유 방어력 (방어도 · 회피 · 에너지 보호막 · 수호). item.armourData 는 기본값 + 이 장비의 +수치 · % 증가 ·
+-- 퀄리티까지 반영한 값이고 PoB 계산(CalcDefence)은 이 값을 그대로 씀 → 0 으로 만들면 그 장비에서 오는 몫이 통째로 빠짐
+-- (다른 곳의 % 증가도 이 장비 몫엔 0 에 곱해짐). RF 처럼 최대치에 비례하는 지속 피해도 같이 줄어듦.
+local DEF_KEYS = { "Armour", "Evasion", "EnergyShield", "Ward" }
+local function defInfo(item)
+	local a = item and item.armourData
+	if not a then return nil end
+	local t, any = { }, false
+	for _, k in ipairs(DEF_KEYS) do
+		if (a[k] or 0) > 0 then
+			t[k] = a[k]
+			any = true
+		end
+	end
+	return any and t or nil
+end
+local function parseDefs(spec)
+	local t, any = { }, false
+	for k in tostring(spec or ""):gmatch("%a+") do
+		t[k] = true
+		any = true
+	end
+	return t, any
+end
+local function zeroDefs(item, off)
+	if item and item.armourData then
+		for k in pairs(off) do
+			if item.armourData[k] then item.armourData[k] = 0 end
+		end
+	end
+end
+
 -- Compare an item (PoB/game English item text) against every slot it fits.
-function es_compare_item(itemText)
+-- nodef: "EnergyShield,Armour" 처럼 끈 고유 방어력 (그 장비 몫을 0 으로)
+function es_compare_item(itemText, nodef)
 	local item = new("Item", itemText)
 	if not item.base then
 		return { error = "item could not be parsed" }
 	end
 	item:BuildModList()
+	local defences = defInfo(item)
+	zeroDefs(item, (parseDefs(nodef)))
 	local itemsTab = build.itemsTab
 	itemsTab:UpdateSockets()
 	local calcFunc, calcBase = build.calcsTab:GetMiscCalculator()
-	local res = { name = item.name, base = item.baseName, rarity = item.rarity, base_stats = pickStats(calcBase), slots = { } }
+	local res = { name = item.name, base = item.baseName, rarity = item.rarity, base_stats = pickStats(calcBase), slots = { },
+		defences = defences }
 	local jewelIndex = { }
 	for i, nodeId in ipairs(sortedJewelSockets()) do jewelIndex[nodeId] = i end
 	if item.type == "Flask" then
@@ -1989,7 +2025,7 @@ end
 -- '장착템 옵션 끄고 켜기': 지금 슬롯에 낀 아이템에서 spec("explicitModLines:2,implicitModLines:1") 줄을 뺀
 -- 상태로 계산. 줄 목록도 같이 돌려줌 (번호 = PoB 목록 안 순서, 다시 부를 때 그대로 씀)
 local VARIANT_LISTS = { "enchantModLines", "implicitModLines", "explicitModLines" }
-function es_slot_variant(slotName, spec, contrib)
+function es_slot_variant(slotName, spec, contrib, nodef)
 	local itemsTab = build.itemsTab
 	local slot = itemsTab.slots[slotName]
 	if not slot then return { error = "no slot " .. tostring(slotName) } end
@@ -1997,7 +2033,29 @@ function es_slot_variant(slotName, spec, contrib)
 	if not cur then return { error = "empty" } end
 	local calcFunc, calcBase = build.calcsTab:GetMiscCalculator()
 	local res = { slot = slotName, name = cur.name, base_name = cur.baseName, rarity = cur.rarity,
-		quality = cur.quality, base = pickStats(calcBase), lines = { } }
+		quality = cur.quality, base = pickStats(calcBase), lines = { }, defences = defInfo(cur) }
+	local offDef, anyDef = parseDefs(nodef)
+	if contrib and res.defences then
+		-- 고유 방어력 하나만 끄면 잃는 양
+		res.def_d = { }
+		local ref = explainPick(calcBase)
+		for k in pairs(res.defences) do
+			local ok, st = pcall(function()
+				local clone = new("Item", cur:BuildRaw())
+				clone:BuildModList()
+				zeroDefs(clone, { [k] = true })
+				return explainPick(calcFunc({ repSlotName = slotName, repItem = clone }))
+			end)
+			if ok and st then
+				local d = { }
+				for _, key in ipairs(EXPLAIN_KEYS) do
+					local a, b = ref[key], st[key]
+					if a and b and a < 1e299 and b < 1e299 then d[key] = a - b end
+				end
+				res.def_d[k] = d
+			end
+		end
+	end
 	local off, any = { }, false
 	for l, i in tostring(spec or ""):gmatch("(%a+):(%d+)") do
 		off[l .. ":" .. i] = true
@@ -2023,7 +2081,7 @@ function es_slot_variant(slotName, spec, contrib)
 		end
 		for _, l in ipairs(res.lines) do l.d = by[l.list .. ":" .. l.idx] end
 	end
-	if any then
+	if any or anyDef then
 		local clone = new("Item", cur:BuildRaw())
 		for _, listName in ipairs(VARIANT_LISTS) do
 			local t = clone[listName] or { }
@@ -2033,6 +2091,8 @@ function es_slot_variant(slotName, spec, contrib)
 		end
 		clone:BuildAndParseRaw()
 		clone:BuildModList()
+		res.defences_now = defInfo(clone)  -- 옵션 줄을 뺀 뒤의 고유 방어력 (끄기 전)
+		zeroDefs(clone, offDef)
 		res.stats = pickStats(calcFunc({ repSlotName = slotName, repItem = clone }))
 	else
 		res.stats = res.base

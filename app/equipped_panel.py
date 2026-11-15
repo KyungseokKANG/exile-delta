@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from overlay import COL, DIM, SPIN, Overlay, slot_label
 
 KIND_TAG = {"enchant": "인챈트", "implicit": "고정"}
+DEF_KO = {"Armour": "방어도", "Evasion": "회피", "EnergyShield": "에너지 보호막", "Ward": "수호"}
 
 
 def _ko(line: str) -> str:
@@ -57,6 +58,7 @@ class EquippedPanel(QWidget):
         self.slots: list[str] = []
         self.data: dict | None = None  # 처음 계산 (줄 목록 · 줄마다 기여도)
         self.off: set[tuple[str, int]] = set()
+        self.nodef: set[str] = set()  # 끈 고유 방어력 (Armour / Evasion / EnergyShield / Ward)
         self._token = 0
         self._dk = "CombinedDPS"
 
@@ -206,6 +208,7 @@ class EquippedPanel(QWidget):
         """슬롯을 바꾸거나 새로 열 때: 줄 목록 + 줄마다 기여도."""
         slot = self._slot()
         self.off = set()
+        self.nodef = set()
         self.data = None
         self._clear_rows()
         self._token += 1
@@ -255,11 +258,28 @@ class EquippedPanel(QWidget):
                 it.widget().hide()
                 it.widget().deleteLater()
 
+    def _rows_spec(self) -> list[dict]:
+        """표시할 줄: 고유 방어력(방어구만) 먼저, 그다음 옵션 줄. key = ('def', 종류) 또는 (목록, 번호)."""
+        out = []
+        data = self.data or {}
+        defs = data.get("defences") or {}
+        for k in ("Armour", "Evasion", "EnergyShield", "Ward"):
+            if defs.get(k):
+                out.append({"key": ("def", k), "tag": "고유 방어", "text": f"{DEF_KO[k]} {defs[k]:,.0f}",
+                            "tip": f"이 장비의 {DEF_KO[k]} 전체 (+수치 · % 증가 · 퀄리티 포함).\n"
+                                   "끄면 그 몫을 통째로 빼고 계산해요.",
+                            "d": (data.get("def_d") or {}).get(k) or {}})
+        for ln in data.get("lines") or []:
+            tag = "제작" if ln.get("crafted") else "분열" if ln.get("fractured") else KIND_TAG.get(ln.get("kind"), "")
+            out.append({"key": (ln["list"], int(ln["idx"])), "tag": tag, "text": _ko(ln["line"]), "tip": ln["line"],
+                        "d": ln.get("d") or {}, "unsupported": ln.get("unsupported")})
+        return out
+
     def _build_rows(self) -> None:
         self._clear_rows()
         base = (self.data or {}).get("base") or {}
-        for ln in (self.data or {}).get("lines") or []:
-            key = (ln["list"], int(ln["idx"]))
+        for spec in self._rows_spec():
+            key = spec["key"]
             row = QFrame()
             row.setObjectName("EditorRow")
             h = QHBoxLayout(row)
@@ -269,17 +289,18 @@ class EquippedPanel(QWidget):
             chk.setChecked(key not in self.off)
             chk.toggled.connect(lambda on, key=key, row=row: self._toggle(key, on, row))
             h.addWidget(chk)
-            tag = "제작" if ln.get("crafted") else "분열" if ln.get("fractured") else KIND_TAG.get(ln.get("kind"), "")
-            if tag:
-                b = QLabel(tag)
+            if spec["tag"]:
+                b = QLabel(spec["tag"])
                 b.setObjectName("KindBadge")
+                if key[0] == "def":
+                    b.setStyleSheet("color: #c8a96a; border-color: #c8a96a;")
                 h.addWidget(b)
-            txt = QLabel(html.escape(_ko(ln["line"])))
+            txt = QLabel(html.escape(spec["text"]))
             txt.setTextFormat(Qt.TextFormat.RichText)
             txt.setWordWrap(True)
-            txt.setToolTip(ln["line"])
+            txt.setToolTip(spec["tip"])
             h.addWidget(txt, 1)
-            d = ln.get("d") or {}
+            d = spec["d"]
             cells = []
             for k, nm in ((self._dk, "DPS"), ("TotalEHP", "EHP")):
                 p = _pct(d, base, k)
@@ -291,7 +312,7 @@ class EquippedPanel(QWidget):
             if rg is not None and abs(rg) >= 0.5:
                 col = COL["X"] if rg > 0 else COL["O"]
                 cells.append(f"<span style='color:{DIM}'>{self._regen_name}</span> <span style='color:{col}'>{-rg:+,.1f}/초</span>")
-            if ln.get("unsupported"):
+            if spec.get("unsupported"):
                 cells.append(f"<span style='color:{COL['△']}'>PoB 미지원</span>")
             info = QLabel("<span style='font-size:9.5pt'>" + (" ".join(cells) or f"<span style='color:{DIM}'>변화 없음</span>")
                           + "</span>")
@@ -343,7 +364,9 @@ class EquippedPanel(QWidget):
         self._token += 1
         tok = self._token
         self._start_spin(self.result)
-        self._client().call("slot_variant", {"slot": slot, "off": [list(k) for k in sorted(self.off)]},
+        lines = [list(k) for k in sorted(self.off) if k[0] != "def"]
+        nodef = sorted(k[1] for k in self.off if k[0] == "def")
+        self._client().call("slot_variant", {"slot": slot, "off": lines, "nodef": nodef},
                             lambda r: self._got_variant(tok, r), lambda m: self._err(tok, m))
 
     def _got_variant(self, tok: int, r: dict) -> None:
@@ -360,9 +383,12 @@ class EquippedPanel(QWidget):
         if r is None:
             self.result.setText(f"<span style='color:{DIM}'>옵션을 다 켠 지금 상태예요. 체크를 끄면 그 옵션 없이 계산해요.</span>")
             return
-        off_lines = [ln for ln in (self.data or {}).get("lines") or [] if (ln["list"], int(ln["idx"])) in self.off]
-        head = (f"<span style='color:{COL['X']}; font-size:10pt'>끈 옵션</span> "
-                f"<span style='font-size:10pt'>{html.escape(', '.join(_ko(ln['line']) for ln in off_lines))}</span><br>")
+        names = []
+        for spec in self._rows_spec():
+            if spec["key"] in self.off:
+                names.append(f"고유 {DEF_KO[spec['key'][1]]}" if spec["key"][0] == "def" else spec["text"])
+        head = (f"<span style='color:{COL['X']}; font-size:10pt'>끈 것</span> "
+                f"<span style='font-size:10pt'>{html.escape(', '.join(names))}</span><br>")
         sl = {"slot": r.get("slot"), "replacing": "옵션 끈 상태", "stats": r.get("stats") or {}}
         body = Overlay._pob_html({"base_stats": r.get("base") or {}, "slots": [sl]})
         self.result.setText(head + body)
