@@ -234,6 +234,8 @@ def main() -> int:
                 self.overlay.hide()
                 if self.editor_win is not None:
                     self.editor_win.hide()
+                if getattr(self, "map_warn", None) is not None:
+                    self.map_warn.hide()
 
         def _open_editor(self) -> None:
             if not self._last_model or self._last_model[0] is None:
@@ -249,13 +251,44 @@ def main() -> int:
                 return
             self.editor_win.show_near_cursor()
 
+        def _map_warn_win(self):
+            if getattr(self, "map_warn", None) is None:
+                from map_warn import MapWarn
+
+                self.map_warn = MapWarn()
+                self.map_warn.settingsRequested.connect(self._open_map_settings)
+            return self.map_warn
+
+        def _open_map_settings(self) -> None:
+            self.showNormal() if self.isMinimized() else self.show()
+            self.raise_()
+            self.activateWindow()
+            self.set_section(0)
+            self.char_page._set_sub(3)
+
+        def _show_map(self, text: str) -> bool:
+            """지도면 비선호 옵션 경고 창 (옵션 조정 창은 닫음)."""
+            import mapcheck
+
+            if not mapcheck.is_map(text):
+                return False
+            if self.editor_win is not None:
+                self.editor_win.hide()
+            if self._map_warn_win().show_map(text):
+                self.flash("지도 감지 — 비선호 옵션 확인")
+            return True
+
         def open_item_text(self, text: str) -> bool:
             """아이템 텍스트(한글·영문)로 옵션 조정·비교 창을 연다. 아이템이 아니면 False."""
+            if self._show_map(text or ""):
+                return True
             item = parse_item(text or "")
             model = parse_model(text or "") if item is not None else None
             if model is None:
                 return False
             self._last_model = (model, item.slot)
+            if getattr(self, "map_warn", None) is not None:
+                self.map_warn.hide()
             self._open_editor()
             return True
 
@@ -269,6 +302,8 @@ def main() -> int:
                 # 게임이 아직 클립보드를 잡고 있으면 빈 값이 옴 → 조금 뒤 다시 읽기 (첫 Ctrl+C 가 씹히던 문제)
                 QTimer.singleShot((60, 120, 250, 400, 700)[attempt], lambda: self._on_clipboard(attempt + 1))
                 return
+            if self._show_map(text):
+                return
             item = parse_item(text)
             if item is None:
                 return
@@ -276,6 +311,8 @@ def main() -> int:
             if model is None:
                 return
             self._last_model = (model, item.slot)
+            if getattr(self, "map_warn", None) is not None:
+                self.map_warn.hide()
             try:  # 해석 문제 진단용: 마지막 Ctrl+C 원문 (이 PC 에만 저장)
                 from paths import LOCAL as d
                 d.mkdir(parents=True, exist_ok=True)
@@ -339,6 +376,8 @@ def main() -> int:
             self.overlay.close()
             if self.editor_win is not None:
                 self.editor_win.close()
+            if getattr(self, "map_warn", None) is not None:
+                self.map_warn.close()
             self.client.stop()
             super().closeEvent(e)
 

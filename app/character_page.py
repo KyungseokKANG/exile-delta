@@ -432,8 +432,9 @@ class CharacterPage(QWidget):
         tips = ("장착 장비·주얼·플라스크: 빼기/바꾸기/옵션 변경, 각 장비의 기여도",
                 "스킬 그룹(주 스킬·사용·Full DPS)과 젬 레벨·퀄리티",
                 "PoB Configuration (적 상태, 버프 등)",
+                "피하고 싶은 지도 옵션 고르기 → 지도에 Ctrl+C 하면 경고",
                 "부위별 DPS 최적 옵션 찾기 (실험 기능)")
-        for i, name in enumerate(("장비 · 주얼", "스킬 · 젬", "계산 설정", "옵션 최적화 (Beta)")):
+        for i, name in enumerate(("장비 · 주얼", "스킬 · 젬", "계산 설정", "비선호 지도", "옵션 최적화 (Beta)")):
             b = QPushButton(name)
             b.setObjectName("SubTab")
             b.setCheckable(True)
@@ -460,12 +461,13 @@ class CharacterPage(QWidget):
         v = QVBoxLayout(host)
         v.setContentsMargins(0, 0, 6, 0)
         v.setSpacing(12)
-        self.sub_pages = [QWidget(), QWidget(), QWidget(), QWidget()]
+        self.sub_pages = [QWidget(), QWidget(), QWidget(), QWidget(), QWidget()]
         page_eq = QVBoxLayout(self.sub_pages[0])
         page_gem = QVBoxLayout(self.sub_pages[1])
         page_cfg = QVBoxLayout(self.sub_pages[2])
-        page_beta = QVBoxLayout(self.sub_pages[3])
-        for pl in (page_eq, page_gem, page_cfg, page_beta):
+        page_map = QVBoxLayout(self.sub_pages[3])
+        page_beta = QVBoxLayout(self.sub_pages[4])
+        for pl in (page_eq, page_gem, page_cfg, page_map, page_beta):
             pl.setContentsMargins(0, 0, 0, 0)
             pl.setSpacing(12)
 
@@ -486,6 +488,12 @@ class CharacterPage(QWidget):
         beta_card, bv2 = card("옵션 최적화  ·  Beta")
         self.beta = BetaCard(self, bv2)
         page_beta.addWidget(beta_card)
+
+        from map_avoid_panel import MapAvoidCard
+
+        map_card, mv = card("비선호 지도  ·  지도에 Ctrl+C 하면 경고")
+        self.map_avoid = MapAvoidCard(self, mv)
+        page_map.addWidget(map_card)
 
         # PoB Configuration
         cfg_card, gv = card("계산 설정  ·  PoB Configuration 탭과 같은 값")
@@ -533,7 +541,7 @@ class CharacterPage(QWidget):
         return outer
 
     def _set_sub(self, i: int, save: bool = True) -> None:
-        i = 0 if i not in (0, 1, 2, 3) else i
+        i = 0 if i not in (0, 1, 2, 3, 4) else i
         for k, (b, w) in enumerate(zip(self.sub_btns, self.sub_pages)):
             b.setChecked(k == i)
             w.setVisible(k == i)  # 숨긴 쪽은 높이를 차지하지 않음
@@ -546,7 +554,7 @@ class CharacterPage(QWidget):
             self._render_config((self._cur() or {}).get("summary") or {})
         if hasattr(self, "gems"):
             self.gems.on_shown(i == 1)
-        if hasattr(self, "beta") and i == 3:
+        if hasattr(self, "beta") and i == 4:
             self.beta.on_shown()
         if save:
             s = load_settings()
