@@ -350,8 +350,12 @@ function es_apply_prefs(p)
 	end
 	local ct = build.configTab
 	local input = ct.configSets[ct.activeConfigSetId].input
+	-- 저항 페널티는 처음 등록할 때(액트 초반) 추정값이 계속 이어지면 안 됨: 진행은 앞으로만 가니 더 센 쪽을 씀
+	local freshPen = input.resistancePenalty or -60
 	for k in pairs(input) do input[k] = nil end
 	for k, v in pairs(p.config) do input[k] = v end
+	local prevPen = input.resistancePenalty or -60
+	if freshPen < prevPen then input.resistancePenalty = freshPen end
 	if ct.UpdateControls then ct:UpdateControls() end
 	ct:BuildModList()
 	for name, active in pairs(p.flasks) do
