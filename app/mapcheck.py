@@ -18,12 +18,14 @@ _NUM = re.compile(r"[+-]?\d+(?:\.\d+)?")
 _TAG = re.compile(r"\s*\((?:implicit|crafted|fractured|enchant|augmented|unmet|scourge|crucible)\)\s*$", re.I)
 _MARK = re.compile(r"\[([^\]|]+)\|([^\]]+)\]")
 _MARK1 = re.compile(r"\[([^\]|]+)\]")
+_UNSCALABLE = re.compile(r"\s*[—-]+\s*(변경이 불가능한 값|Unscalable Value)\s*$", re.I)
 TIER_KO = {"map": "일반", "maven": "메이븐", "t17": "17티어"}
 
 
 def skel(s: str) -> str:
     """tools/build_map_mods.py 의 skel 과 같은 규칙 (범위·수치 → '#', 부호 무시, 소문자)."""
     s = _MARK1.sub(r"\1", _MARK.sub(r"\2", s)).strip()
+    s = re.sub(r"(?<=\d)" + _RANGE.pattern, "", s)  # 고급 설명(Ctrl+Alt+C): 86(70-89) → 86
     s = _RANGE.sub("#", s)
     s = _NUM.sub("#", s)
     s = re.sub(r"[+-]#", "#", s)
@@ -89,8 +91,11 @@ def parse_map(text: str) -> MapInfo | None:
     unid = corrupted = False
     mods: list[str] = []
     for ln in lines[i:]:
-        if not ln or ln == SEP:
-            continue
+        if not ln or ln == SEP or ln.startswith("{"):
+            continue  # 고급 설명의 { 접두어 속성 부여 … } 머리줄
+        if "지도 장치" in ln or "Map Device" in ln:
+            continue  # 아이템 설명문
+        ln = _UNSCALABLE.sub("", ln)
         if ln in ("미확인", "Unidentified"):
             unid = True
             continue
@@ -107,6 +112,10 @@ def parse_map(text: str) -> MapInfo | None:
         if sep and len(k) <= 20:
             continue  # 속성 줄 (아이템 수량: +80% 등)
         mods.append(_TAG.sub("", ln))
+    if tier is None:  # 새 형식: 베이스 이름에 '지도 (10등급)' / 'Map (Tier 10)'
+        mt = re.search(r"\((\d+)\s*등급\)|\(Tier\s*(\d+)\)", base, re.I)
+        if mt:
+            tier = int(mt.group(1) or mt.group(2))
     return MapInfo(name, base, rarity, tier, unid, corrupted, mods)
 
 

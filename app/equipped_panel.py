@@ -2,7 +2,7 @@
 
 - 비교 대상 슬롯(반지면 반지 1 / 2)은 위 콤보에서 고름
 - 줄마다 오른쪽에 '이 줄만 빼면' 잃는 양 (처음 한 번 계산)
-- 체크를 끄면 0.3초 뒤 그 줄들을 뺀 장비로 다시 계산 (지금 장착 상태 대비)
+- 체크를 끄면 0.3초 뒤 그 줄들을 뺀 장비로 다시 계산 → 옵션변경 창의 비교 기준(그 칸)을 이 상태로 바꿈
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from overlay import COL, DIM, SPIN, Overlay, slot_label
+from overlay import COL, DIM, SPIN, slot_label
 
 KIND_TAG = {"enchant": "인챈트", "implicit": "고정"}
 DEF_KO = {"Armour": "방어도", "Evasion": "회피", "EnergyShield": "에너지 보호막", "Ward": "수호"}
@@ -90,7 +90,8 @@ class EquippedPanel(QWidget):
         self.name.setTextFormat(Qt.TextFormat.RichText)
         self.name.setWordWrap(True)
         v.addWidget(self.name)
-        hint = QLabel("체크를 끄면 그 옵션이 없는 상태로 계산해요. 오른쪽 숫자는 그 줄 하나만 뺐을 때 잃는 양이에요.")
+        hint = QLabel("체크를 끄면 그 옵션이 빠진 상태가 내 기준이 돼서, 옵션변경 창의 아이템을 그 기준과 비교해요. "
+                      "오른쪽 숫자는 그 줄 하나만 뺐을 때 잃는 양이에요.")
         hint.setStyleSheet(f"color: {DIM}; font-size: 10pt;")
         hint.setWordWrap(True)
         v.addWidget(hint)
@@ -210,6 +211,7 @@ class EquippedPanel(QWidget):
         self.off = set()
         self.nodef = set()
         self.data = None
+        self.editor.set_equip_base(None)
         self._clear_rows()
         self._token += 1
         tok = self._token
@@ -351,6 +353,10 @@ class EquippedPanel(QWidget):
         if not self.off:
             return
         self.off = set()
+        self._token += 1  # 계산 중이던 결과는 버림
+        self._spin.stop()
+        self._spin_target = None
+        self.editor.set_equip_base(None)
         self._build_rows()
         self._render(None)
 
@@ -359,6 +365,10 @@ class EquippedPanel(QWidget):
         if not slot or self.data is None:
             return
         if not self.off:
+            self._token += 1
+            self._spin.stop()
+            self._spin_target = None
+            self.editor.set_equip_base(None)
             self._render(None)
             return
         self._token += 1
@@ -377,18 +387,25 @@ class EquippedPanel(QWidget):
         if not r or r.get("error"):
             self._err(tok, (r or {}).get("error") or "?")
             return
+        # 옵션변경 창의 비교 기준을 '이 옵션들을 뺀 지금 장비'로 바꿈
+        self.editor.set_equip_base(self._slot(), r.get("stats") or {}, "옵션 뺀 상태")
         self._render(r)
 
     def _render(self, r: dict | None) -> None:
         if r is None:
-            self.result.setText(f"<span style='color:{DIM}'>옵션을 다 켠 지금 상태예요. 체크를 끄면 그 옵션 없이 계산해요.</span>")
+            self.result.setText(f"<span style='color:{DIM}'>옵션을 다 켠 지금 상태예요. 체크를 끄면 그 옵션이 빠진 상태를 "
+                                f"내 기준으로 삼아서, 옵션변경 창의 아이템과 비교해요.</span>")
             return
         names = []
         for spec in self._rows_spec():
             if spec["key"] in self.off:
                 names.append(f"고유 {DEF_KO[spec['key'][1]]}" if spec["key"][0] == "def" else spec["text"])
-        head = (f"<span style='color:{COL['X']}; font-size:10pt'>끈 것</span> "
-                f"<span style='font-size:10pt'>{html.escape(', '.join(names))}</span><br>")
-        sl = {"slot": r.get("slot"), "replacing": "옵션 끈 상태", "stats": r.get("stats") or {}}
-        body = Overlay._pob_html({"base_stats": r.get("base") or {}, "slots": [sl]})
-        self.result.setText(head + body)
+        from statfmt import change_cells
+
+        cells = change_cells(r.get("base") or {}, r.get("stats") or {})
+        self.result.setText(
+            f"<span style='color:{COL['X']}; font-size:10pt'>끈 것</span> "
+            f"<span style='font-size:10pt'>{html.escape(', '.join(names))}</span><br>"
+            f"<span style='color:#c8a96a; font-size:10pt'>옵션변경 창은 이제 이 상태를 기준으로 비교해요.</span><br>"
+            f"<span style='color:{DIM}; font-size:10pt'>원래 장착 상태와 비교하면</span> "
+            f"<span style='font-size:10pt'>{' · '.join(cells) or '변화 없음'}</span>")

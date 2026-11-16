@@ -597,6 +597,8 @@ class ItemEditor(QWidget):
         self._spin = QTimer(self, interval=90, timeout=self._tick)
         self._spin_i = 0
         self._orig_summary: dict | None = None
+        self._last_r: dict | None = None  # 마지막 비교 결과 (기준이 바뀌면 다시 그림)
+        self._equip_base: tuple | None = None  # (칸, 기준 스탯, 설명): 장착템 옵션 창에서 끈 옵션을 뺀 '내 기준'
         QShortcut(QKeySequence("Esc"), self, activated=self.close)
         # 이 창이 포커스를 쥔 채로 게임 아이템에 Ctrl+C → 게임으로 넘겨서 새 아이템이 바로 뜨게
         # (입력칸에서 글자를 고른 상태의 Ctrl+C 는 입력칸이 먼저 처리)
@@ -614,6 +616,8 @@ class ItemEditor(QWidget):
         self.original = copy.deepcopy(self.model)
         self.slot = slot
         self._orig_summary = None
+        self._last_r = None
+        self._equip_base = None
         slot_ko = self.db.slot_name(slot) if slot else ""
         flags = [FLAG_KO.get(f, f) for f in model.flags]
         flag_html = "".join(f" <span style='color:{FLAG_COLOR.get(f, DIM)}; font-size:10pt'>[{html.escape(f)}]</span>"
@@ -902,6 +906,32 @@ class ItemEditor(QWidget):
         self.equip_btn.blockSignals(True)
         self.equip_btn.setChecked(False)
         self.equip_btn.blockSignals(False)
+        self.set_equip_base(None)
+
+    def set_equip_base(self, slot: str | None, stats: dict | None = None, label: str = "") -> None:
+        """장착템 옵션 창에서 옵션을 끄면: 그 칸의 비교 기준을 '옵션 뺀 지금 장비'로 바꿈 (None 이면 원래대로)."""
+        new = (slot, stats, label) if slot and stats else None
+        if new is None and self._equip_base is None:
+            return
+        self._equip_base = new
+        if self._last_r is not None:
+            self.result.setText(Overlay._pob_html(self._with_equip_base(self._last_r)))
+        self._render_orig()
+
+    def _with_equip_base(self, r: dict | None) -> dict | None:
+        eb = self._equip_base
+        if not eb or not r or r.get("error") or len(r.get("slots") or []) > 2:
+            return r
+        slot, stats, label = eb
+        out = dict(r)
+        out["slots"] = []
+        for sl in r.get("slots") or []:
+            if sl.get("slot") == slot:
+                sl = dict(sl)
+                sl["base"] = stats
+                sl["replacing"] = f"{sl.get('replacing') or '빈 슬롯'} ({label})"
+            out["slots"].append(sl)
+        return out
 
     def moveEvent(self, e):
         super().moveEvent(e)
@@ -909,7 +939,7 @@ class ItemEditor(QWidget):
             self.equip_panel.follow()
 
     def _render_orig(self) -> None:
-        r = self._orig_summary
+        r = self._with_equip_base(self._orig_summary)
         if not r or r.get("error") or not r.get("slots"):
             self.orig_label.setText("")
             return
@@ -977,6 +1007,7 @@ class ItemEditor(QWidget):
         self._token += 1
         tok = self._token
         self._last_text = text
+        self._last_r = None
         self._why = None
         self.why_btn.hide()
         self.why_label.hide()
@@ -1010,7 +1041,8 @@ class ItemEditor(QWidget):
             if err:
                 self.result.setText(f"<span style='color:{COL['X']}'>계산 실패: {html.escape(err)}</span>")
             else:
-                self.result.setText(Overlay._pob_html(r or {}))
+                self._last_r = r or {}
+                self.result.setText(Overlay._pob_html(self._with_equip_base(r or {})))
                 self._sync_def((r or {}).get("defences"))
                 self._start_why(tok, r or {})
         except Exception as e:  # noqa: BLE001 — '계산 중' 에 멈춰 있지 않도록
