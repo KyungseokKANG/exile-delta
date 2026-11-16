@@ -72,6 +72,49 @@ def _send_copy_to(hwnd: int) -> bool:
         return False
 
 
+class _VGrip(QWidget):
+    """창 아래 끝 손잡이: 위아래로 끌면 결과 칸 높이가 바뀜 (놓을 때 설정에 저장)."""
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.win = win
+        self.setFixedHeight(9)
+        self.setCursor(Qt.CursorShape.SizeVerCursor)
+        self.setToolTip("위아래로 끌어서 창 높이 조절")
+        self._y0 = None
+        self._e0 = 0
+
+    def paintEvent(self, e):
+        from PySide6.QtGui import QColor, QPainter
+
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor("#0e0c09"))
+        p.setPen(QColor("#6b5a3e"))
+        cx, cy = self.width() // 2, self.height() // 2
+        p.drawLine(cx - 22, cy - 1, cx + 22, cy - 1)
+        p.drawLine(cx - 22, cy + 2, cx + 22, cy + 2)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._y0 = e.globalPosition().y()
+            self._e0 = self.win._extra_h
+            e.accept()
+
+    def mouseMoveEvent(self, e):
+        if self._y0 is not None:
+            self.win._extra_h = int(self._e0 + e.globalPosition().y() - self._y0)
+            self.win._apply_extra()
+
+    def mouseReleaseEvent(self, e):
+        if self._y0 is not None:
+            self._y0 = None
+            from storage import load_settings, save_settings
+
+            s = load_settings()
+            s["editor_extra_h"] = self.win._extra_h
+            save_settings(s)
+
+
 def _foreground_other() -> int:
     """지금 앞에 있는 창이 다른 프로그램(게임)이면 그 hwnd, 아니면 0."""
     if sys.platform != "win32":
@@ -543,6 +586,11 @@ class ItemEditor(QWidget):
         close2.clicked.connect(self.close)
         foot.addWidget(close2)
         v.addLayout(foot)
+        # 아래 끝을 잡고 세로로 늘리기/줄이기 → 늘어난 만큼 결과 칸(스크롤)이 커짐. 늘린 양은 기억
+        from storage import load_settings
+
+        self._extra_h = int(load_settings().get("editor_extra_h", 0) or 0)
+        outer.addWidget(_VGrip(self))
 
         self._timer = QTimer(self, singleShot=True, interval=300, timeout=self._recompute)
         self._wait = QTimer(self, singleShot=True, interval=30000, timeout=self._timeout)
@@ -617,7 +665,18 @@ class ItemEditor(QWidget):
         two = bool(self.slot) and ("Ring" in self.slot or "반지" in self.slot)
         jewel = self.model is not None and ("주얼" in (self.model.base or "") or "Jewel" in (self.model.base or ""))
         want = 380 if jewel else 300 if two else 210
-        self.res_scroll.setFixedHeight(max(150, min(want, int(avail * (0.38 if jewel else 0.3)))))
+        self._res_base = max(150, min(want, int(avail * (0.38 if jewel else 0.3))))
+        self._apply_extra()
+
+    def _apply_extra(self) -> None:
+        """결과 칸 높이 = 기본 + 사용자가 아래 끝을 끌어 늘린 양 (화면 밖으로 안 나가게)."""
+        screen = QGuiApplication.screenAt(self.geometry().center()) or QGuiApplication.primaryScreen()
+        g = screen.availableGeometry()
+        base = getattr(self, "_res_base", 210)
+        others = self.height() - self.res_scroll.height() if self.isVisible() else 0
+        room = g.bottom() - self.y() - others - 4 if self.isVisible() else g.height()
+        self._extra_h = max(-(base - 120), min(self._extra_h, max(0, room - base)))
+        self.res_scroll.setFixedHeight(base + self._extra_h)
         self.adjustSize()
 
     def _changed(self) -> None:

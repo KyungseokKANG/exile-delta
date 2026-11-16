@@ -433,6 +433,43 @@ function es_save_xml()
 	return build:SaveDB("code")
 end
 
+-- 스스로 받는 지속 피해(TotalBuildDegen)가 어디서 오는지: PoB 와 같은 *Degen BASE 옵션의 출처별 합
+-- [{kind="skill"|"item"|"tree"|"other", name=영문 이름, value=초당}] 큰 순 (표시 이름: 정의의 화염 · 피의 격노 등)
+local function degenSources(env)
+	local modDB = env and env.player and env.player.modDB
+	if not modDB then return nil end
+	local by, order = { }, { }
+	for _, dt in ipairs({ "Physical", "Fire", "Cold", "Lightning", "Chaos" }) do
+		for _, row in ipairs(modDB:Tabulate("BASE", nil, dt .. "Degen")) do
+			local src = row.mod.source or ""
+			local kind, id = src:match("^([^:]+):?(.*)$")
+			local name, k = src, "other"
+			if kind == "Skill" then
+				k = "skill"
+				local gd = data.skills[id]
+				name = gd and gd.name or id
+			elseif kind == "Item" then
+				k = "item"
+				name = id:match("^%d+:(.+)$") or id
+			elseif kind == "Tree" then
+				k, name = "tree", "Passive Tree"
+			end
+			local key = k .. ":" .. name
+			if not by[key] then
+				by[key] = { kind = k, name = name, value = 0 }
+				order[#order + 1] = by[key]
+			end
+			by[key].value = by[key].value + (tonumber(row.value) or 0)
+		end
+	end
+	local res = { }
+	for _, e in ipairs(order) do
+		if e.value > 0 then res[#res + 1] = e end
+	end
+	table.sort(res, function(a, b) return a.value > b.value end)
+	return res
+end
+
 function es_summary()
 	local out = { }
 	out.className = build.spec.curClassName
@@ -451,6 +488,7 @@ function es_summary()
 	local menv = build.calcsTab.mainEnv
 	out.minionName = menv and menv.minion and menv.minion.minionData and menv.minion.minionData.name or nil
 	out.minionInMain = es_minion_in_main
+	out.degenSources = degenSources(menv)
 	out.groups = { }
 	for i, group in ipairs(build.skillsTab.socketGroupList) do
 		local gems = { }
@@ -468,9 +506,27 @@ function es_summary()
 			}
 		end
 		local actives = { }
+		-- 액티브마다 실제로 붙는 보조젬 (PoB canGrantedEffectSupportActiveSkill, 꺼진 보조젬도 포함해 판정)
+		-- [{active = gemList 번호, supports = {번호…}}] — 젬 탭에서 '액티브 밑에 그 보조젬들' 로 보여줌
+		local links = { }
 		for j, s in ipairs(group.displaySkillList or { }) do
 			local ge = s.activeEffect and s.activeEffect.grantedEffect
 			actives[j] = ge and ge.name or ("Skill " .. j)
+			local ai = 0
+			for k, gem in ipairs(group.gemList or { }) do
+				if s.activeEffect and gem == s.activeEffect.srcInstance then ai = k break end
+			end
+			if ai > 0 then
+				local sup = { }
+				for k, gem in ipairs(group.gemList or { }) do
+					local sge = gem.gemData and gem.gemData.grantedEffect or gem.grantedEffect
+					if k ~= ai and sge and sge.support then
+						local ok, yes = pcall(calcLib.canGrantedEffectSupportActiveSkill, sge, s)
+						if ok and yes then sup[#sup + 1] = k end
+					end
+				end
+				links[#links + 1] = { active = ai, supports = sup }
+			end
 		end
 		out.groups[i] = {
 			label = group.displayLabel or group.label or "",
@@ -479,6 +535,7 @@ function es_summary()
 			includeInFullDPS = group.includeInFullDPS == true,
 			mainActiveSkill = group.mainActiveSkill or 1,
 			actives = actives,
+			links = links,
 			gems = gems,
 		}
 	end

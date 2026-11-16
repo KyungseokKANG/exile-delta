@@ -354,7 +354,7 @@ class CharacterPage(QWidget):
             "EnergyShield": StatTile("에너지 보호막", "#9fb5ff"),
             "Mana": StatTile("마나", "#7f9fff"),
             "Speed": StatTile("초당 사용", "#c8a96a"),
-            "NetRecovery": StatTile("RF 순 회복", "#e8794f"),
+            "NetRecovery": StatTile("순 생명력 회복", "#e8794f"),
         }
         self.tiles["NetRecovery"].hide()
         self.tiles["CombinedDPS"].setToolTip("Combined DPS: 주 스킬의 타격 + 도트·점화·중독 합")
@@ -1126,9 +1126,10 @@ class CharacterPage(QWidget):
             v = st.get(k)
             sub = ""
             if k == "NetRecovery":
-                # RF 등 스스로 받는 지속 피해가 있을 때만: 그 피해를 받는 쪽의 순 회복 (PoB Net Recovery 값)
-                from statfmt import _pool, degen_pools, has_degen, net_regen
+                # 정의의 화염 · 피의 격노 등 스스로 받는 지속 피해가 있을 때만: 그 피해를 받는 쪽의 순 회복 (PoB Net Recovery 값)
+                from statfmt import _pool, degen_label, degen_pools, has_degen, net_regen, set_degen_sources
 
+                set_degen_sources(s.get("degenSources"))
                 on = bool(st) and has_degen(st)
                 tile.setVisible(on)
                 if not on:
@@ -1136,8 +1137,14 @@ class CharacterPage(QWidget):
                 pools = degen_pools(st) or ["Life"]
                 v = net_regen(st, pools[0])
                 nm, _ = _pool(pools[0])
-                sub = f"RF 피해 {st.get('TotalBuildDegen') or 0:,.0f}/초" if pools[0] == "Life" else f"{nm} 기준"
-                rows = [f"스스로 받는 지속 피해 {st.get('TotalBuildDegen') or 0:,.1f}/초"]
+                tile.t.setText(f"순 {nm} 회복")
+                lab = degen_label()
+                sub = f"{lab} -{st.get('TotalBuildDegen') or 0:,.0f}/초"
+                rows = [f"{lab}: 스스로 받는 피해 {st.get('TotalBuildDegen') or 0:,.1f}/초"]
+                srcs = s.get("degenSources") or []
+                if len(srcs) > 1:
+                    from statfmt import _src_ko
+                    rows += [f"  · {_src_ko(e)} {e.get('value', 0):,.1f}/초 (증감 적용 전)" for e in srcs]
                 for p in pools:
                     rows.append(f"순 {_pool(p)[0]} 회복 {net_regen(st, p) or 0:+,.1f}/초")
                 if st.get("TotalNetRegen") is not None:

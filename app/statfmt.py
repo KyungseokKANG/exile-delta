@@ -134,6 +134,64 @@ POOLS = (("Life", "생명력", "#e07a6a"), ("EnergyShield", "보호막", "#9fb5f
 RF_COL = "#e8794f"
 
 
+_DEGEN_SRC: list[dict] = []  # 지금 캐릭터의 지속 피해 출처 (PoB es_summary degenSources)
+
+
+def set_degen_sources(src: list[dict] | None) -> None:
+    global _DEGEN_SRC
+    _DEGEN_SRC = list(src or [])
+
+
+def _src_ko(e: dict) -> str:
+    name = e.get("name") or ""
+    try:
+        if e.get("kind") == "skill":
+            import skillnames
+
+            return skillnames.ko(name) or name
+        if e.get("kind") == "item":
+            import ko2en
+
+            return ko2en.name_ko(name) or name
+    except Exception:  # noqa: BLE001
+        return name
+    if e.get("kind") == "tree":
+        return "패시브"
+    return name
+
+
+def degen_label() -> str:
+    """지속 피해 이름: '정의의 화염', '정의의 화염·피의 격노' … 모르면 '지속 피해'."""
+    names = []
+    for e in _DEGEN_SRC:
+        n = _src_ko(e)
+        if n and n not in names:
+            names.append(n)
+    if not names:
+        return "지속 피해"
+    return "·".join(names[:2]) + (" 등" if len(names) > 2 else "")
+
+
+def _ro(word: str) -> str:
+    """조사 '로/으로' (받침 없거나 ㄹ 받침이면 '로')."""
+    ch = word[-1:] if word else ""
+    if "가" <= ch <= "힣":
+        jong = (ord(ch) - 0xAC00) % 28
+        return "로" if jong in (0, 8) else "으로"
+    return "로"
+
+
+def _degen_skill() -> str:
+    """지속 피해를 주는 스킬 이름 (껐다 켜는 것들: 정의의 화염 · 피의 격노 …). 없으면 빈 문자열."""
+    names = []
+    for e in _DEGEN_SRC:
+        if e.get("kind") == "skill":
+            n = _src_ko(e)
+            if n and n not in names:
+                names.append(n)
+    return "·".join(names[:2])
+
+
 def has_degen(*stats: dict) -> bool:
     return any((s or {}).get("TotalBuildDegen") or (s or {}).get("LifeDegen") for s in stats)
 
@@ -167,14 +225,15 @@ def _max_key(p: str) -> str:
 
 
 def rf_lines(base: dict, new: dict) -> list[str]:
-    """비교 창용 RF 카드 (여러 줄 HTML). 지속 피해가 없으면 빈 목록."""
+    """비교 창용 지속 피해(정의의 화염 · 피의 격노 등) 카드 (여러 줄 HTML). 지속 피해가 없으면 빈 목록."""
     if not base or not new or not has_degen(base, new):
         return []
     out = []
     da, db = base.get("TotalBuildDegen") or 0, new.get("TotalBuildDegen") or 0
     dcol = NEG if db > da + 0.05 else POS if db < da - 0.05 else DIM
-    out.append(f"<span style='color:{RF_COL}; font-weight:bold'>RF 기준</span> "
-               f"<span style='color:{DIM}'>스스로 받는 지속 피해</span> {da:,.1f} → "
+    lab = degen_label()
+    what = "스스로 받는 지속 피해" if lab == "지속 피해" else f"{lab}{_ro(lab)} 받는 피해"
+    out.append(f"<span style='color:{RF_COL}; font-weight:bold'>{what}</span> {da:,.1f} → "
                f"<b style='color:{dcol}'>{db:,.1f}</b>/초")
     warns = []
     for i, p in enumerate(degen_pools(base, new)):
@@ -195,7 +254,9 @@ def rf_lines(base: dict, new: dict) -> list[str]:
         if b < 0:
             warns.append(nm)
     if warns:
-        out.append(f"&nbsp;&nbsp;<b style='color:{NEG}'>⚠ 순 {'·'.join(warns)} 회복이 마이너스예요 — 이대로면 RF 못 켜요</b>")
+        sk = _degen_skill()
+        tail = f"{sk} 켜두면 계속 깎여요" if sk else "계속 깎여요"
+        out.append(f"&nbsp;&nbsp;<b style='color:{NEG}'>⚠ 순 {'·'.join(warns)} 회복이 마이너스예요 — {tail}</b>")
     return out
 
 
@@ -211,8 +272,8 @@ def regen_cell(base: dict, new: dict) -> str:
         if a is None or b is None or abs(b - a) < 1:
             return ""
         col = POS if b > a else NEG
-        warn = f" <b style='color:{NEG}'>⚠ RF 못 켬</b>" if b < 0 <= a else ""
-        return (f"<span style='color:{DIM}'>RF 순 {nm} 회복</span> {a:,.0f} → "
+        warn = f" <b style='color:{NEG}'>⚠ 마이너스</b>" if b < 0 <= a else ""
+        return (f"<span style='color:{DIM}'>순 {nm} 회복</span> {a:,.0f} → "
                 f"<b style='color:{col}'>{b:,.0f}</b>/초{warn}")
     a, b = base.get("LifeRegenRecovery"), new.get("LifeRegenRecovery")
     if a is None or b is None or abs(b - a) < 1:

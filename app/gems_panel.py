@@ -206,16 +206,26 @@ class GemsCard:
                 row += 1
             self.grid.addWidget(h, row, 0, 1, 5)
             row += 1
-            for ii, gem in enumerate(gems, start=1):
+            for ii, under, orphan in self._order(g, gems):
+                gem = gems[ii - 1]
                 from_item = bool(gem.get("fromItem"))
                 chk = QCheckBox()
                 chk.setChecked(bool(gem.get("enabled", True)))
                 chk.setEnabled(ready and not from_item)
                 chk.toggled.connect(lambda on, gi=gi, ii=ii: self._set(gi, ii, enabled=on))
                 self.grid.addWidget(chk, row, 0)
-                name = QLabel(("└ " if gem.get("support") else "") + gem_ko(gem["name"]))
+                if under:
+                    label = "&nbsp;&nbsp;&nbsp;└ " + gem_ko(gem["name"])
+                elif orphan:
+                    label = (gem_ko(gem["name"]) +
+                             f" <span style='color:{DIM}; font-size:9pt'>(붙는 스킬 없음)</span>")
+                else:
+                    label = gem_ko(gem["name"])
+                name = QLabel(label)
                 name.setTextFormat(Qt.TextFormat.RichText)
                 name.setStyleSheet(f"color: {'#9fb5ff' if gem.get('support') else '#ddd5c6'};")
+                if under:
+                    name.setToolTip("위 스킬에 붙는 보조젬 (같은 보조젬이 여러 스킬에 붙으면 스킬마다 보여요 — 한 곳에서 바꾸면 같이 바뀜)")
                 self.grid.addWidget(name, row, 1)
                 lv = QSpinBox()
                 lv.setRange(1, 40)
@@ -264,6 +274,39 @@ class GemsCard:
         self.grid.setColumnStretch(3, 1)
         if not groups:
             self.grid.addWidget(QLabel("PoB 엔진에서 스킬을 읽는 중…"), 0, 0, 1, 4)
+
+    @staticmethod
+    def _order(g: dict, gems: list[dict]) -> list[tuple[int, bool, bool]]:
+        """보여줄 순서 [(젬 번호 1부터, 액티브 밑의 보조젬인지, 붙는 스킬 없는 보조젬인지)].
+        액티브마다 그 스킬에 실제로 붙는 보조젬을 바로 밑에 (PoB 판정 links). 같은 보조젬이 여러 액티브에 붙으면
+        액티브마다 한 번씩. 어디에도 안 붙은 젬(꺼진 액티브 등)은 원래 순서로 뒤에."""
+        links = g.get("links") or []
+        if isinstance(links, dict):  # (빈 Lua 표는 {} 로 옴)
+            links = list(links.values())
+        if not links:
+            return [(i, False, False) for i in range(1, len(gems) + 1)]
+        out, used = [], set()
+        for ln in links:
+            a = int(ln.get("active") or 0)
+            if not 1 <= a <= len(gems):
+                continue
+            out.append((a, False, False))
+            used.add(a)
+            sups = ln.get("supports") or []
+            if isinstance(sups, dict):
+                sups = list(sups.values())
+            for sidx in sups:
+                sidx = int(sidx)
+                if 1 <= sidx <= len(gems):
+                    out.append((sidx, True, False))
+                    used.add(sidx)
+        rest = [i for i in range(1, len(gems) + 1) if i not in used]
+        has_active_left = any(not gems[i - 1].get("support") for i in rest)
+        for i in rest:
+            sup = bool(gems[i - 1].get("support"))
+            # 꺼진 액티브가 남아 있으면 그 밑으로 (원래 순서), 아니면 어디에도 안 붙는 보조젬
+            out.append((i, sup and has_active_left, sup and not has_active_left))
+        return out
 
     def _later(self, key, fn) -> None:
         """연속 클릭은 마지막 값만, 단 젬·항목별로 따로 모아 한꺼번에 (다른 젬 변경이 덮이지 않게)."""
