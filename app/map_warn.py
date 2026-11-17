@@ -1,10 +1,10 @@
-"""지도 Ctrl+C → 비선호 옵션 경고 창 (커서 근처, 포커스 안 뺏음, Esc · ✕ · 다른 아이템 Ctrl+C 로 닫힘)."""
+"""지도 Ctrl+C → 비선호 옵션 경고 창 (커서 근처, 뜰 때 포커스 가져옴 → Esc 로 닫으면 게임으로 돌려줌)."""
 from __future__ import annotations
 
 import html
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QCursor, QGuiApplication
+from PySide6.QtGui import QCursor, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 import mapcheck
@@ -70,8 +70,11 @@ class MapWarn(QWidget):
         self.set_btn.clicked.connect(lambda: (self.close(), self.settingsRequested.emit()))
         row.addWidget(self.set_btn)
         v.addLayout(row)
+        # 이 창이 포커스를 쥔 채로 게임 아이템/지도에 Ctrl+C → 게임으로 넘겨서 새 것이 바로 뜨게
+        QShortcut(QKeySequence.StandardKey.Copy, self, activated=self._forward_copy)
         self._esc_timer = QTimer(self, interval=40, timeout=self._poll_esc)
         self._esc_down = False
+        self._prev_fg = 0
         self._drag = None
         self._placed = False
 
@@ -138,14 +141,44 @@ class MapWarn(QWidget):
             g = screen.availableGeometry()
             x = min(max(g.left(), pos.x() - self.width() // 2), g.right() - self.width())
             y = min(max(g.top(), pos.y() - 40), g.bottom() - self.height() - 40)
+        from item_editor import _foreground_other
+
+        fg = _foreground_other()
+        if fg:
+            self._prev_fg = fg
+        elif not (self.isVisible() and self.isActiveWindow()):
+            self._prev_fg = 0
         self.move(x, y)
         self.show()
         self._esc_down = True
         self._esc_timer.start()
+        QTimer.singleShot(0, self._grab_focus)
+
+    def _grab_focus(self) -> None:
+        """뜰 때 포커스를 가져와서 Esc 가 게임으로 안 가고 이 창이 닫히게."""
+        from item_editor import _focus_window
+
+        if not self.isVisible():
+            return
+        _focus_window(int(self.winId()))
+        self.raise_()
+        self.activateWindow()
 
     def hideEvent(self, e):
+        from item_editor import _focus_window
+
+        if self.isActiveWindow() and getattr(self, "_prev_fg", 0):
+            _focus_window(self._prev_fg)  # 닫히면 게임으로 돌려줌
         self._esc_timer.stop()
         super().hideEvent(e)
+
+    def _forward_copy(self) -> None:
+        from item_editor import _press_ctrl_c, _send_copy_to
+
+        if self.frameGeometry().contains(QCursor.pos()):
+            return  # 커서가 이 창 위 → 복사할 게임 아이템 없음
+        if _send_copy_to(self._prev_fg):
+            QTimer.singleShot(150, _press_ctrl_c)
 
     def _poll_esc(self) -> None:
         from item_editor import _key_down

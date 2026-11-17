@@ -132,6 +132,40 @@ def _foreground_other() -> int:
         return 0
 
 
+def _focus_window(hwnd: int) -> bool:
+    """hwnd 창을 맨 앞 + 키보드 포커스로. 다른 프로그램(게임)이 앞에 있어도 되게 그 창의 입력 스레드에 잠깐 붙어서 넘김."""
+    if sys.platform != "win32" or not hwnd:
+        return False
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        if not user32.IsWindow(hwnd):
+            return False
+        my_tid = ctypes.windll.kernel32.GetCurrentThreadId()
+        fg = user32.GetForegroundWindow()
+        if fg == hwnd:
+            return True
+        fg_tid = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+        attached = bool(fg_tid and fg_tid != my_tid and user32.AttachThreadInput(my_tid, fg_tid, True))
+        try:
+            user32.BringWindowToTop(hwnd)
+            ok = bool(user32.SetForegroundWindow(hwnd)) and user32.GetForegroundWindow() == hwnd
+            if not ok:
+                # 포그라운드 잠금 풀기: 이 프로그램이 마지막 입력을 보낸 것으로 만들어야 넘겨줌 (Alt 한 번 톡)
+                # (게임이 관리자 권한이면 이것도 막힘 → 이 프로그램도 관리자 권한으로 켜야 함)
+                kb = user32.keybd_event
+                kb(0x12, 0, 0x0001, 0)
+                kb(0x12, 0, 0x0001 | 0x0002, 0)
+                ok = bool(user32.SetForegroundWindow(hwnd)) and user32.GetForegroundWindow() == hwnd
+        finally:
+            if attached:
+                user32.AttachThreadInput(my_tid, fg_tid, False)
+        return ok
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _key_down(vk: int) -> bool:
     if sys.platform != "win32":
         return False
@@ -1098,10 +1132,13 @@ class ItemEditor(QWidget):
     # ------------------------------------------------------------ 표시
     def show_near_cursor(self) -> None:
         """처음엔 커서 근처, 이후엔 사용자가 옮겨 둔 자리 그대로.
-        포커스는 가져오지 않음 → 게임에 계속 Ctrl+C 가 가서 다른 아이템을 바로 이어서 볼 수 있음 (Esc 는 감시 타이머로)."""
+        뜰 때 포커스를 가져옴 → Esc 가 게임으로 안 가고 이 창이 닫힘, 닫히면 포커스는 게임으로 돌려줌.
+        이 창에 포커스가 있어도 게임 아이템 위 Ctrl+C 는 게임으로 넘겨서(_forward_copy) 다음 아이템을 바로 볼 수 있음."""
         fg = _foreground_other()
         if fg:
             self._prev_fg = fg
+        elif not (self.isVisible() and self.isActiveWindow()):
+            self._prev_fg = 0  # 프로그램 메인 창 등에서 연 경우 → 닫을 때 게임으로 넘기지 않음
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         if self._placed:
             # 옮겨 둔 자리가 (해상도 변경·모니터 분리 등으로) 화면 밖이면 안으로
@@ -1120,11 +1157,22 @@ class ItemEditor(QWidget):
             x = min(max(g.left(), pos.x() - self.width() // 2), g.right() - self.width())
             y = min(max(g.top(), pos.y() - 40), g.bottom() - self.height() - 40)
             self.move(x, y)
-        self.show()  # 항상 위 창이라 raise_/activate 없이도 게임 위에 보임 (포커스는 게임에 그대로)
+        self.show()
         self._esc_down = True  # 뜨는 순간 눌려 있던 키는 무시
         self._esc_timer.start()
+        QTimer.singleShot(0, self._grab_focus)
+
+    def _grab_focus(self) -> None:
+        if not self.isVisible():
+            return
+        _focus_window(int(self.winId()))
+        self.raise_()
+        self.activateWindow()
 
     def hideEvent(self, e):
+        # 이 창이 포커스를 쥔 채 닫히면 게임으로 돌려줌 (Esc 누르고 바로 게임 조작)
+        if self.isActiveWindow() and getattr(self, "_prev_fg", 0):
+            _focus_window(self._prev_fg)
         self._esc_timer.stop()
         if self.equip_panel is not None:
             self.equip_panel.hide()

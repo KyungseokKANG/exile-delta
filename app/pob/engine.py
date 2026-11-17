@@ -11,6 +11,30 @@ import zlib
 from pathlib import Path
 
 
+def _lua_path(p: Path, rel: bytes | None = None) -> bytes:
+    """Lua(LuaJIT, ANSI 파일 API)에 넘길 경로. 영문이면 그대로, 아니면 8.3 짧은 경로 → 상대 경로 → ANSI 인코딩 순."""
+    s = str(p).replace("\\", "/").rstrip("/")
+    if s.isascii():
+        return s.encode()
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            buf = ctypes.create_unicode_buffer(1024)
+            n = ctypes.windll.kernel32.GetShortPathNameW(str(p), buf, 1024)
+            short = buf.value.replace("\\", "/").rstrip("/") if 0 < n < 1024 else ""
+            if short and short.isascii():
+                return short.encode()
+        except Exception:  # noqa: BLE001
+            pass
+    if rel is not None:
+        return rel
+    try:
+        return s.encode("mbcs", "strict")  # 한국어 Windows 면 한글도 ANSI(cp949)로 표현됨
+    except (LookupError, UnicodeError):
+        return s.encode()
+
+
 def _to_py(obj, depth=0):
     """Lua 테이블 → Python dict/list (bytes 는 utf-8 문자열로)."""
     from lupa import luajit21 as lj
@@ -37,10 +61,11 @@ class PobEngine:
         os.chdir(self.src)  # PoB 는 상대경로로 모듈/데이터를 읽는다
         self.lua = lj.LuaRuntime(encoding=None, unpack_returned_tuples=True)
         g = self.lua.globals()
-        runtime_lua = (self.src.parent / "runtime" / "lua").as_posix()
-        g.package.path = f"./?.lua;{runtime_lua}/?.lua;{runtime_lua}/?/init.lua;".encode() + g.package.path
-        g._ES_SRC = (self.src.as_posix() + "/").encode()
-        g._ES_USER = (Path(user_dir).as_posix() + "/").encode()
+        # LuaJIT 의 파일 열기는 ANSI 경로라 한글 사용자 이름 등 비영문 경로를 못 엶 ("module 'xml' not found")
+        # → 작업 폴더(src) 기준 상대 경로로, 절대 경로가 필요한 곳은 8.3 짧은 경로로 넘김
+        g.package.path = b"./?.lua;../runtime/lua/?.lua;../runtime/lua/?/init.lua;" + g.package.path
+        g._ES_SRC = _lua_path(self.src, b".") + b"/"
+        g._ES_USER = _lua_path(Path(user_dir)) + b"/"
         g._ES_INFLATE = self._inflate
         g._ES_DEFLATE = self._deflate
         g._ES_LOG = lambda m: self.log(m.decode("utf-8", "replace") if isinstance(m, bytes) else str(m))
