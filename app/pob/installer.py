@@ -58,21 +58,41 @@ def _bad_file() -> Path:
     return BASE / "bad.json"
 
 
-def bad_tags() -> dict:
-    """자체 점검에 실패한 버전 {tag: 이유} — 자동 업데이트에서 건너뜀."""
+def _app_version() -> str:
+    try:
+        from version import VERSION
+
+        return VERSION
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _bad_all() -> dict:
     import json
 
     try:
-        return json.loads(_bad_file().read_text(encoding="utf-8"))
+        d = json.loads(_bad_file().read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def bad_tags() -> dict:
+    """자체 점검에 실패한 버전 {tag: 이유} — 자동 업데이트에서 건너뜀.
+    이 프로그램 버전에서 실패한 것만: 프로그램이 업데이트되면(호환 패치 등) 다시 점검해 봄."""
+    cur = _app_version()
+    out = {}
+    for tag, v in _bad_all().items():
+        if isinstance(v, dict) and v.get("app") == cur:
+            out[tag] = v.get("reason", "")
+    return out
 
 
 def mark_bad(tag: str, reason: str) -> None:
     import json
 
-    d = bad_tags()
-    d[tag] = reason[:300]
+    d = _bad_all()
+    d[tag] = {"reason": reason[:300], "app": _app_version()}
     BASE.mkdir(parents=True, exist_ok=True)
     _bad_file().write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
 

@@ -62,15 +62,41 @@ function GetWorkDir() return _ES_SRC end
 function LaunchSubScript(scriptText, funcList, subList, ...) end
 function AbortSubScript(ssID) end
 function IsSubScriptRunning(ssID) end
+-- PoB 2.68+ 는 자체 LuaJIT 의 복합 대입(a += 1, s ..= "x")을 씀 → 여기 LuaJIT 은 문법 오류
+-- 그냥 읽어 보고 실패할 때만 그 줄들을 a = a + (1) 꼴로 바꿔서 다시 읽음
+local function es_desugar_line(line)
+	local ind, lhs, op, rhs = line:match("^(%s*)([%a_][%w_%.%[%]\"']*)%s*([%+%-%*/%%%^])=%s*([^=].-)%s*$")
+	if not ind then
+		ind, lhs, rhs = line:match("^(%s*)([%a_][%w_%.%[%]\"']*)%s*%.%.=%s*([^=].-)%s*$")
+		op = ".."
+	end
+	if not ind then return line end
+	local code, comment = rhs:match("^(.-)%s*(%-%-[^\"']*)$")
+	if code and code ~= "" then rhs = code else comment = nil end
+	return ind .. lhs .. " = " .. lhs .. " " .. op .. " (" .. rhs .. ")" .. (comment and (" " .. comment) or "")
+end
+function es_loadfile(fileName)
+	local func, err = loadfile(fileName)
+	if func or not tostring(err):find("expected near") then return func, err end
+	local f = io.open(fileName, "rb")
+	if not f then return func, err end
+	local src = f:read("*a")
+	f:close()
+	local out = {}
+	for line in (src .. "\n"):gmatch("([^\n]*)\n") do out[#out + 1] = es_desugar_line(line) end
+	local func2, err2 = loadstring(table.concat(out, "\n"), "@" .. fileName)
+	if func2 then return func2 end
+	return nil, err2
+end
 function LoadModule(fileName, ...)
 	if not fileName:match("%.lua") then fileName = fileName .. ".lua" end
-	local func, err = loadfile(fileName)
+	local func, err = es_loadfile(fileName)
 	if func then return func(...) end
 	error("LoadModule() error loading '"..fileName.."': "..tostring(err))
 end
 function PLoadModule(fileName, ...)
 	if not fileName:match("%.lua") then fileName = fileName .. ".lua" end
-	local func, err = loadfile(fileName)
+	local func, err = es_loadfile(fileName)
 	if func then return PCall(func, ...) end
 	error("PLoadModule() error loading '"..fileName.."': "..tostring(err))
 end
@@ -109,6 +135,23 @@ package.preload["lua-utf8"] = function()
 		next = function(s, i) i = (i or 0) + 1; if i <= #s then return i end end,
 	}
 end
+-- require 로 읽는 모듈(Classes.* 등)도 복합 대입을 풀어서 읽게: 기본 Lua 파일 찾기 대신 쓰는 찾기 함수
+table.insert(package.loaders, 2, function(name)
+	local rel = name:gsub("%.", "/")
+	local tried = { }
+	for pat in package.path:gmatch("[^;]+") do
+		local path = pat:gsub("%?", rel)
+		local f = io.open(path, "rb")
+		if f then
+			f:close()
+			local func, err = es_loadfile(path)
+			if func then return func end
+			error("error loading module '" .. name .. "' from file '" .. path .. "':\n\t" .. tostring(err), 0)
+		end
+		tried[#tried + 1] = "\n\tno file '" .. path .. "'"
+	end
+	return table.concat(tried)
+end)
 local l_require = require
 function require(name)
 	if name == "lcurl.safe" or name == "lua-profiler" then return nil end
@@ -116,7 +159,20 @@ function require(name)
 end
 
 arg = arg or { }
-dofile("Launch.lua")
+assert(es_loadfile("Launch.lua"))()
+-- PoB 2.68+: new("Item", raw) 대신 new("Item"):Item(raw) (생성자 인자를 new 에 넘기면 오류). 두 방식 다 되게
+-- (판별은 처음 쓸 때: 여기선 아직 Common.lua 가 안 읽혀서 new 가 없음)
+function es_newobj(className, ...)
+	if ES_NEW_API == nil then
+		local probe = new("Item")
+		ES_NEW_API = getmetatable(probe) ~= common.classes["Item"]
+	end
+	if ES_NEW_API then
+		local obj = new(className)
+		return obj[className](obj, ...)
+	end
+	return new(className, ...)
+end
 mainObject.continuousIntegrationMode = false
 runCallback("OnInit")
 runCallback("OnFrame")
@@ -1291,7 +1347,7 @@ local function ensureItemDBs()
 end
 
 local function makeBaseItem(baseEntry, rarity, title)
-	local item = new("Item")
+	local item = es_newobj("Item")
 	item.name = baseEntry.name
 	item.base = baseEntry.base
 	item.baseName = baseEntry.name
@@ -1470,11 +1526,11 @@ function es_draft_new(specJson)
 	if spec.from == "unique" then
 		local src = main.uniqueDB.list[spec.name]
 		if not src then return { error = "유니크를 찾을 수 없습니다" } end
-		item = new("Item", src:BuildRaw())
+		item = es_newobj("Item", src:BuildRaw())
 	elseif spec.from == "rare" then
 		local src = main.rareDB.list[spec.name]
 		if not src then return { error = "템플릿을 찾을 수 없습니다" } end
-		item = new("Item", src:BuildRaw())
+		item = es_newobj("Item", src:BuildRaw())
 	elseif spec.from == "base" then
 		local b = findBase(spec.base)
 		if not b then return { error = "베이스를 찾을 수 없습니다" } end
@@ -1483,9 +1539,9 @@ function es_draft_new(specJson)
 		local slot = build.itemsTab.slots[spec.slot]
 		local src = slot and build.itemsTab.items[slot.selItemId]
 		if not src then return { error = "장착된 아이템이 없습니다" } end
-		item = new("Item", src:BuildRaw())
+		item = es_newobj("Item", src:BuildRaw())
 	else
-		item = new("Item", spec.raw or "")
+		item = es_newobj("Item", spec.raw or "")
 	end
 	if not item or not item.base then return { error = "아이템을 해석하지 못했습니다" } end
 	item:BuildModList()
@@ -1577,7 +1633,7 @@ function es_draft_edit(specJson)
 		item:BuildAndParseRaw()
 	end
 	if spec.raw then
-		local it = new("Item", spec.raw)
+		local it = es_newobj("Item", spec.raw)
 		if it and it.base then item = it esDraft = it end
 	end
 	item:BuildModList()
@@ -1815,7 +1871,7 @@ function es_draft_replace(slotName)
 	local slot = itemsTab.slots[slotName]
 	local old = slot and itemsTab.items[slot.selItemId]
 	if not old then return es_draft_equip(slotName) end
-	local fresh = new("Item", item:BuildRaw())
+	local fresh = es_newobj("Item", item:BuildRaw())
 	fresh.id = old.id
 	local before = slot.nodeId and allocIds()
 	itemsTab:AddItem(fresh, true)  -- 같은 id 면 교체 (클러스터 주얼이면 PoB 가 트리 다시 구성)
@@ -1834,7 +1890,7 @@ function es_draft_equip(slotName)
 	if not item then return { error = "no draft" } end
 	local itemsTab = build.itemsTab
 	if not itemsTab:IsItemValidForSlot(item, slotName) then return { error = "이 슬롯에 넣을 수 없는 아이템입니다" } end
-	local fresh = new("Item", item:BuildRaw())
+	local fresh = es_newobj("Item", item:BuildRaw())
 	itemsTab:AddItem(fresh, true)
 	return es_set_slot(slotName, fresh.id)
 end
@@ -1939,7 +1995,7 @@ end
 -- Compare an item (PoB/game English item text) against every slot it fits.
 -- nodef: "EnergyShield,Armour" 처럼 끈 고유 방어력 (그 장비 몫을 0 으로)
 function es_compare_item(itemText, nodef)
-	local item = new("Item", itemText)
+	local item = es_newobj("Item", itemText)
 	if not item.base then
 		return { error = "item could not be parsed" }
 	end
@@ -2060,7 +2116,7 @@ local function explainLines(item, slotName, calcFunc, ref, sign)
 	for _, listName in ipairs({ "enchantModLines", "implicitModLines", "explicitModLines" }) do
 		for i, ml in ipairs(item[listName] or { }) do
 			local ok, st = pcall(function()
-				local clone = new("Item", raw)
+				local clone = es_newobj("Item", raw)
 				table.remove(clone[listName], i)
 				clone:BuildAndParseRaw()
 				clone:BuildModList()
@@ -2102,7 +2158,7 @@ function es_slot_variant(slotName, spec, contrib, nodef)
 		local ref = explainPick(calcBase)
 		for k in pairs(res.defences) do
 			local ok, st = pcall(function()
-				local clone = new("Item", cur:BuildRaw())
+				local clone = es_newobj("Item", cur:BuildRaw())
 				clone:BuildModList()
 				zeroDefs(clone, { [k] = true })
 				return explainPick(calcFunc({ repSlotName = slotName, repItem = clone }))
@@ -2143,7 +2199,7 @@ function es_slot_variant(slotName, spec, contrib, nodef)
 		for _, l in ipairs(res.lines) do l.d = by[l.list .. ":" .. l.idx] end
 	end
 	if any or anyDef then
-		local clone = new("Item", cur:BuildRaw())
+		local clone = es_newobj("Item", cur:BuildRaw())
 		for _, listName in ipairs(VARIANT_LISTS) do
 			local t = clone[listName] or { }
 			for i = #t, 1, -1 do
@@ -2162,7 +2218,7 @@ function es_slot_variant(slotName, spec, contrib, nodef)
 end
 
 function es_explain_item(itemText, slotName)
-	local item = new("Item", itemText)
+	local item = es_newobj("Item", itemText)
 	if not item.base then return { error = "item could not be parsed" } end
 	item:BuildModList()
 	local itemsTab = build.itemsTab

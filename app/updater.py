@@ -19,7 +19,6 @@ from pob import installer
 from pob.client import PobClient
 from storage import load_settings, save_settings
 
-POB_EVERY = 6 * 3600
 DICT_EVERY = 3 * 86400
 TEST_TIMEOUT_MS = 240_000
 TEST_RING = ("Item Class: Rings\nRarity: Rare\nSelftest Loop\nGold Ring\n--------\nItem Level: 80\n--------\n"
@@ -46,7 +45,7 @@ class Updater(QObject):
     def auto(self) -> None:
         s = load_settings()
         now = time.time()
-        if installer.installed() and now - float(s.get("pob_update_at", 0)) > POB_EVERY:
+        if installer.installed():  # PoB 새 버전은 켤 때마다 확인 (리그 시작·패치 날 바로 반영)
             self.check_pob(manual=False)
         if now - float(s.get("dict_update_at", 0)) > DICT_EVERY:
             self.update_dict(manual=False)
