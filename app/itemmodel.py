@@ -79,6 +79,7 @@ class Mod:
     base_vals: bool = False  # 수치가 퀄리티 적용 전 값 (고급 복사 원문 · 새로 추가한 줄) → 촉매 퀄리티를 곱해서 계산
     unscalable: bool = False  # '— 변경이 불가능한 값' (퀄리티 영향 없음)
     affix: str = ""       # prefix / suffix (고급 복사 머리줄; 좌·우 촉매용)
+    grp: int = 0          # 같은 옵션 하나에 속한 줄 묶음 번호 (하이브리드 옵션: 물리 피해 % + 정확도). 0 = 혼자
 
 
 @dataclass
@@ -141,6 +142,7 @@ def parse(text: str) -> ItemModel | None:
     except Exception:  # noqa: BLE001
         pass
     advanced = any(x.startswith("{") for s in sections[lvl_idx + 1:] for x in s)
+    hdr = 0  # 고급 복사 머리줄 번호 = 그 아래 줄들이 한 옵션
     for s in sections[lvl_idx + 1:]:
         kind, sub, affix = "explicit", "", ""
         sec: list[Mod] = []
@@ -158,6 +160,7 @@ def parse(text: str) -> ItemModel | None:
                 sub = _header_sub(raw) if kind == "implicit" else ""
                 hl = raw.lower()
                 affix = "prefix" if ("접두" in hl or "prefix" in hl) else "suffix" if ("접미" in hl or "suffix" in hl) else ""
+                hdr += 1
                 continue
             if raw in FLAG_LINES:
                 model.flags.append(raw)
@@ -176,7 +179,7 @@ def parse(text: str) -> ItemModel | None:
             if ln and any(ch.isalnum() for ch in ln):
                 # 고급 복사의 수치는 퀄리티 적용 전 값 (PoB 주석: values won't have catalyst applied)
                 sec.append(Mod(ln, k, sub=sub if k == "implicit" else "", base_vals=advanced,
-                               unscalable=unscalable, affix=affix))
+                               unscalable=unscalable, affix=affix, grp=hdr if advanced else 0))
         sec = _merge_multiline(sec, lang)
         if sec and _is_flavour(sec, lang, unique):
             continue
@@ -195,7 +198,7 @@ def _merge_multiline(sec: list[Mod], lang: str) -> list[Mod]:
             a = sec[i]
             if i + 1 < len(sec) and sec[i + 1].kind == a.kind and ko2en.joins(a.text, sec[i + 1].text, lang):
                 a = Mod(a.text + "\n" + sec[i + 1].text, a.kind, sub=a.sub, base_vals=a.base_vals,
-                        unscalable=a.unscalable or sec[i + 1].unscalable, affix=a.affix)
+                        unscalable=a.unscalable or sec[i + 1].unscalable, affix=a.affix, grp=a.grp)
                 i += 2
             else:
                 i += 1

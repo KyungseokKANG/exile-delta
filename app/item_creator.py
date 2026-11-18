@@ -421,15 +421,38 @@ class ItemCreator(QWidget):
             out.append(f"<span style='color:#6fd0c4'>[{CAT_KO.get(r['catalyst'], r['catalyst'])} 퀄리티 +{r.get('catalystQuality') or 0}%]</span>")
         return (" &nbsp;" + " ".join(out)) if out else ""
 
-    @staticmethod
-    def _line_text(ln: dict) -> str:
+    def _sorted_lines(self, lines: list[dict]) -> list[dict]:
+        """고정 → 접두 → 접미 순 (같은 묶음 안에서는 원래 순서). 하이브리드 옵션(여러 줄)은 붙여서 ┌ └ 표시."""
+        import affix
+
+        rows = affix.ordered(lines, getattr(self, "slot", None))
+        ann = getattr(self, "_ann", {})
+        for i, (ln, gid, a) in enumerate(rows):
+            mark = ""
+            if gid:
+                first = i == 0 or rows[i - 1][1] != gid
+                last = i == len(rows) - 1 or rows[i + 1][1] != gid
+                if not (first and last):
+                    mark = "┌" if first else "└" if last else "│"
+                if not last:
+                    a = ""  # 접두/접미 표시는 묶음 마지막 줄에 한 번
+            ann[(ln["kind"], ln["idx"])] = (mark, a)
+        self._ann = ann
+        return [r[0] for r in rows]
+
+    def _line_text(self, ln: dict) -> str:
+        from affix import html_badge
+
         ko = ko2en.passive_ko(ln["line"])
         tag = KIND_KO.get(ln["kind"], "")
         if ln.get("crafted"):
             tag = "제작"
+        mark, a = getattr(self, "_ann", {}).get((ln["kind"], ln["idx"]), ("", ""))
+        lead = f"<span style='color:#6b5d48'>{mark}</span> " if mark else ""
         en = f"<br><span style='color:#5f574b; font-size:9pt'>{html.escape(ln['line'])}</span>" if ko != ln["line"] else ""
-        return (f"<span style='color:{'#b8a8ff' if ln['kind'] != 'explicit' else '#9fb5ff'}'>{html.escape(ko)}</span>"
-                + (f" <span style='color:{DIM}; font-size:9pt'>({tag})</span>" if tag else "") + en)
+        return (lead + f"<span style='color:{'#b8a8ff' if ln['kind'] != 'explicit' else '#9fb5ff'}'>{html.escape(ko)}</span>"
+                + (f" <span style='color:{DIM}; font-size:9pt'>({tag})</span>" if tag else "")
+                + (f" &nbsp;{html_badge(a)}" if a else "") + en)
 
     def _build_body(self, r: dict) -> None:
         self._clear_body()
@@ -467,7 +490,7 @@ class ItemCreator(QWidget):
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(6)
         row = 0
-        for ln in r.get("lines") or []:
+        for ln in self._sorted_lines(r.get("lines") or []):
             if not ln.get("active"):
                 continue
             if r.get("crafted") and ln["kind"] == "explicit" and (ln.get("prefix") or ln.get("suffix")):
@@ -884,7 +907,7 @@ class ItemCreator(QWidget):
         if not hasattr(self, "crafted_lines"):
             return
         try:
-            lines = [ln for ln in r.get("lines") or [] if ln["kind"] == "explicit" and ln.get("active")]
+            lines = self._sorted_lines([ln for ln in r.get("lines") or [] if ln["kind"] == "explicit" and ln.get("active")])
             self.crafted_lines.setText("<br>".join(self._line_text(ln) for ln in lines) or
                                        f"<span style='color:{DIM}'>고른 옵션이 없습니다</span>")
         except RuntimeError:

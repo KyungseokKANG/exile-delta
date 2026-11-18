@@ -37,19 +37,43 @@ def slot_name(s: dict) -> str:
     return SLOT_KO.get(s["label"], s["label"])
 
 
-def item_tooltip(it: dict | None) -> str:
+def item_tooltip(it: dict | None, slot: str | None = None, affixes: bool = True) -> str:
+    """slot = PoB 슬롯 이름 (접두/접미 판별용). affixes=False 면 접두/접미를 따지지 않음 (주얼 · 플라스크)."""
     if not it:
         return "비어 있음"
+    import affix
+
     col = RARITY_COL.get(it.get("rarity"), "#ddd5c6")
     out = [f"<b style='color:{col}'>{html.escape(it.get('name') or '')}</b>"
            f"<br><span style='color:{DIM}'>{RARITY_KO.get(it.get('rarity'), '')} · {html.escape(it.get('base') or '')}"
            + (" · 타락" if it.get("corrupted") else "") + "</span>"]
+    lines = it.get("lines") or []
+    if affixes:
+        rows = affix.ordered(lines, slot)
+    else:
+        rows = [(ln, 0, "") for ln in lines]
     last = None
-    for ln in it.get("lines") or []:
+    n_in = {}
+    for _ln, gid, _a in rows:
+        if gid:
+            n_in[gid] = n_in.get(gid, 0) + 1
+    seen = set()
+    for ln, gid, a in rows:
         k = ln.get("kind")
-        if last is not None and k != last:
+        g = affix.group(k or "explicit", a)
+        if last is not None and g != last:
             out.append("<span style='color:#4a4032'>────────</span>")
-        last = k
+        last = g
+        # 하이브리드 옵션: 접두/접미 표시는 묶음 마지막 줄에 한 번, 줄 앞에 묶음 표시
+        if gid and n_in.get(gid, 0) > 1:
+            first = gid not in seen
+            seen.add(gid)
+            n_in[gid] -= 1
+            mark = "┌" if first else "└" if n_in[gid] == 0 else "│"
+            lead = f"<span style='color:#6b5d48'>{mark} </span>"
+            a = a if n_in[gid] == 0 else ""
+        else:
+            lead = ""
         tag = KIND_KO.get(k, "")
         if ln.get("crafted"):
             tag = "제작"
@@ -57,8 +81,9 @@ def item_tooltip(it: dict | None) -> str:
             tag = "분열"
         txt = ko2en.passive_ko(ln["line"])
         color = "#b8a8ff" if k != "explicit" else "#9fb5ff" if not ln.get("crafted") else "#b9e0ff"
-        out.append(f"<span style='color:{color}'>{html.escape(txt)}</span>"
-                   + (f" <span style='color:{DIM}'>({tag})</span>" if tag else ""))
+        out.append(f"{lead}<span style='color:{color}'>{html.escape(txt)}</span>"
+                   + (f" <span style='color:{DIM}'>({tag})</span>" if tag else "")
+                   + (f" &nbsp;{affix.html_badge(a)}" if a else ""))
     return "<br>".join(out)
 
 
@@ -271,7 +296,7 @@ class EquipmentCard:
                 self.grid.addWidget(h, row, 0, 1, 5)
                 row += 1
             it = s.get("item")
-            tip = item_tooltip(it)
+            tip = item_tooltip(it, s["slot"], affixes=s["kind"] not in ("jewel", "abyss"))
             chk = QCheckBox()
             chk.setChecked(bool(it))
             opts = s.get("options") or []
@@ -353,7 +378,7 @@ class EquipmentCard:
         dk = "FullDPS" if base.get("FullDPS") else "CombinedDPS"
         for f in fl:
             it = f.get("item")
-            tip = item_tooltip(it)
+            tip = item_tooltip(it, affixes=False)
             chk = QCheckBox()
             chk.setChecked(bool(f.get("active")))
             chk.setEnabled(ready and bool(it))

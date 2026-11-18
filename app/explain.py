@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 
+from affix import html_badge as affix_html
 from statfmt import DIM, NEG, POS
 
 KIND_KO = {"enchant": "인챈트", "implicit": "implicit"}
@@ -42,21 +43,33 @@ def _hint(line: str, dps: float) -> str:
 
 def _rows(res: dict, dk: str) -> list[dict]:
     """[{side: 'new'|'old', text, dps%, ehp%, life, hint}] — 차이가 있는 줄만."""
+    import affix
+
     base = res.get("base") or {}
     b_dps, b_ehp = base.get(dk) or 0.0, base.get("TotalEHP") or 0.0
+    slot = res.get("slot")
     out = []
     for side, sign in (("new", 1), ("old", -1)):
-        for ln in res.get(f"{side}_lines") or []:
+        lines = res.get(f"{side}_lines") or []
+        rows = []
+        for ln, (gid, aff) in zip(lines, affix.annotate(lines, slot)):
             d = ln.get("d") or {}
             dps = sign * (d.get(dk) or 0.0)
             ehp = sign * (d.get("TotalEHP") or 0.0)
             life = sign * (d.get("Life") or 0.0)
             p_dps = dps / b_dps * 100 if b_dps and b_dps < 1e299 else 0.0
             p_ehp = ehp / b_ehp * 100 if b_ehp and b_ehp < 1e299 else 0.0
-            if abs(p_dps) < 0.05 and abs(p_ehp) < 0.05:
-                continue
-            out.append({"side": side, "text": _ko(ln.get("line") or ""), "en": ln.get("line") or "",
-                        "dps": p_dps, "ehp": p_ehp, "life": life, "hint": _hint(ln.get("line") or "", dps)})
+            rows.append({"side": side, "text": _ko(ln.get("line") or ""), "en": ln.get("line") or "",
+                         "dps": p_dps, "ehp": p_ehp, "life": life, "hint": _hint(ln.get("line") or "", dps),
+                         "affix": aff, "group": affix.group(ln.get("kind") or "explicit", aff),
+                         "gid": f"{side}{gid}" if gid else ""})
+
+        def big(r):
+            return abs(r["dps"]) >= 0.05 or abs(r["ehp"]) >= 0.05
+
+        # 하이브리드 옵션은 한 줄이라도 차이가 있으면 묶음째 남김
+        keep = {r["gid"] for r in rows if r["gid"] and big(r)}
+        out += [r for r in rows if big(r) or (r["gid"] and r["gid"] in keep)]
     return out
 
 
@@ -99,20 +112,39 @@ def detail_html(results: list[tuple[str, dict]], dk: str) -> str:
            f"(+ 는 이득, − 는 손해 · 지금 상태 대비 %)</span>"]
     for label, res in results:
         rows = _rows(res, dk)
-        t = [f"<tr><td colspan='4' style='color:#c8a96a; padding-top:6px'><b>{html.escape(label)}</b></td></tr>",
+        t = [f"<tr><td colspan='5' style='color:#c8a96a; padding-top:6px'><b>{html.escape(label)}</b></td></tr>",
              f"<tr style='color:{DIM}'><td></td><td align='right'>&nbsp;{dname}&nbsp;</td>"
-             f"<td align='right'>&nbsp;EHP&nbsp;</td><td align='right'>&nbsp;생명력</td></tr>"]
+             f"<td align='right'>&nbsp;EHP&nbsp;</td><td align='right'>&nbsp;생명력</td><td></td></tr>"]
         for side, title in (("new", "새 아이템이 주는 것"), ("old", f"빠지는 것 ({res.get('old_name') or '지금 장비'})")):
             rs = [r for r in rows if r["side"] == side]
             if not rs:
                 continue
-            t.append(f"<tr><td colspan='4' style='color:{DIM}'>{html.escape(title)}</td></tr>")
-            for r in sorted(rs, key=lambda r: -abs(r["dps"]) - abs(r["ehp"]) * 0.01):
+            t.append(f"<tr><td colspan='5' style='color:{DIM}'>{html.escape(title)}</td></tr>")
+            # 고정 → 접두 → 접미 순, 같은 묶음 안에서는 영향이 큰 옵션부터. 하이브리드 옵션(여러 줄)은 붙여서
+            weight: dict[str, float] = {}
+            for r in rs:
+                if r["gid"]:
+                    weight[r["gid"]] = weight.get(r["gid"], 0.0) + abs(r["dps"]) + abs(r["ehp"]) * 0.01
+
+            def w(r):
+                return weight[r["gid"]] if r["gid"] else abs(r["dps"]) + abs(r["ehp"]) * 0.01
+
+            rs = sorted(rs, key=lambda r: (r["group"], -w(r), r["gid"]))
+            for i, r in enumerate(rs):
                 life = f"{r['life']:+.0f}" if abs(r["life"]) >= 0.5 else ""
-                t.append(f"<tr><td>&nbsp;&nbsp;{html.escape(r['text'])}</td><td align='right'>{_pc(r['dps'])}</td>"
-                         f"<td align='right'>{_pc(r['ehp'])}</td><td align='right'>{life}</td></tr>")
+                g = r["gid"]
+                first = g and (i == 0 or rs[i - 1]["gid"] != g)
+                last = g and (i == len(rs) - 1 or rs[i + 1]["gid"] != g)
+                lead = "&nbsp;&nbsp;"
+                if g and not (first and last):
+                    mark = "┌" if first else "└" if last else "│"
+                    lead = f"<span style='color:#6b5d48'>{mark}</span>&nbsp;"
+                badge = affix_html(r["affix"]) if (not g or last) else ""
+                t.append(f"<tr><td>{lead}{html.escape(r['text'])}</td><td align='right'>{_pc(r['dps'])}</td>"
+                         f"<td align='right'>{_pc(r['ehp'])}</td><td align='right'>{life}</td>"
+                         f"<td align='right'>&nbsp;{badge}</td></tr>")
                 if r["hint"]:
-                    t.append(f"<tr><td colspan='4' style='color:{DIM}; font-size:9.5pt'>&nbsp;&nbsp;&nbsp;&nbsp;→ "
+                    t.append(f"<tr><td colspan='5' style='color:{DIM}; font-size:9.5pt'>&nbsp;&nbsp;&nbsp;&nbsp;→ "
                              f"{html.escape(r['hint'])}</td></tr>")
         # 줄마다 합과 전체 변화의 차이 = 베이스(방어도 등)·옵션끼리 겹치는 효과
         s_dps = sum(r["dps"] for r in rows)
@@ -121,8 +153,8 @@ def detail_html(results: list[tuple[str, dict]], dk: str) -> str:
         rest_dps, rest_ehp = tot_dps - s_dps, tot_ehp - s_ehp
         if abs(rest_dps) >= 0.1 or abs(rest_ehp) >= 0.1:
             t.append(f"<tr><td style='color:{DIM}'>&nbsp;&nbsp;그 밖 (베이스 방어도·옵션끼리 겹치는 효과)</td>"
-                     f"<td align='right'>{_pc(rest_dps)}</td><td align='right'>{_pc(rest_ehp)}</td><td></td></tr>")
+                     f"<td align='right'>{_pc(rest_dps)}</td><td align='right'>{_pc(rest_ehp)}</td><td></td><td></td></tr>")
         t.append(f"<tr><td><b>합계</b></td><td align='right'>{_pc(tot_dps)}</td>"
-                 f"<td align='right'>{_pc(tot_ehp)}</td><td></td></tr>")
+                 f"<td align='right'>{_pc(tot_ehp)}</td><td></td><td></td></tr>")
         out.append("<table cellspacing='0' cellpadding='1' width='100%'>" + "".join(t) + "</table>")
     return "".join(out)

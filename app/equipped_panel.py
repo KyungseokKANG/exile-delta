@@ -271,10 +271,26 @@ class EquippedPanel(QWidget):
                             "tip": f"이 장비의 {DEF_KO[k]} 전체 (+수치 · % 증가 · 퀄리티 포함).\n"
                                    "끄면 그 몫을 통째로 빼고 계산해요.",
                             "d": (data.get("def_d") or {}).get(k) or {}})
-        for ln in data.get("lines") or []:
+        for k in out:
+            k["keys"] = [k["key"]]
+            k["lines"] = [{"text": k["text"], "tip": k["tip"], "d": k["d"]}]
+        import affix
+
+        # 인챈트 → 고정 → 접두 → 접미, 하이브리드 옵션(여러 줄이 한 옵션)은 한 칸
+        last_g = None
+        for ln, g, aff in affix.ordered(data.get("lines") or [], self._slot()):
+            key = (ln["list"], int(ln["idx"]))
+            one = {"text": _ko(ln["line"]), "tip": ln["line"], "d": ln.get("d") or {},
+                   "unsupported": ln.get("unsupported")}
+            if g and g == last_g and out:
+                out[-1]["keys"].append(key)
+                out[-1]["lines"].append(one)
+                out[-1]["text"] += " / " + one["text"]
+                continue
+            last_g = g
             tag = "제작" if ln.get("crafted") else "분열" if ln.get("fractured") else KIND_TAG.get(ln.get("kind"), "")
-            out.append({"key": (ln["list"], int(ln["idx"])), "tag": tag, "text": _ko(ln["line"]), "tip": ln["line"],
-                        "d": ln.get("d") or {}, "unsupported": ln.get("unsupported")})
+            out.append({"key": key, "keys": [key], "tag": tag, "text": one["text"], "tip": one["tip"],
+                        "lines": [one], "affix": aff})
         return out
 
     def _build_rows(self) -> None:
@@ -289,41 +305,59 @@ class EquippedPanel(QWidget):
             h.setSpacing(6)
             chk = QCheckBox()
             chk.setChecked(key not in self.off)
-            chk.toggled.connect(lambda on, key=key, row=row: self._toggle(key, on, row))
-            h.addWidget(chk)
+            chk.toggled.connect(lambda on, keys=spec["keys"], row=row: self._toggle(keys, on, row))
+            h.addWidget(chk, 0, Qt.AlignmentFlag.AlignVCenter)
             if spec["tag"]:
                 b = QLabel(spec["tag"])
                 b.setObjectName("KindBadge")
                 if key[0] == "def":
                     b.setStyleSheet("color: #c8a96a; border-color: #c8a96a;")
-                h.addWidget(b)
-            txt = QLabel(html.escape(spec["text"]))
-            txt.setTextFormat(Qt.TextFormat.RichText)
-            txt.setWordWrap(True)
-            txt.setToolTip(spec["tip"])
-            h.addWidget(txt, 1)
-            d = spec["d"]
-            cells = []
-            for k, nm in ((self._dk, "DPS"), ("TotalEHP", "EHP")):
-                p = _pct(d, base, k)
-                if p is not None and abs(p) >= 0.05:
-                    # d = 이 줄이 주는 몫 → 빼면 -p
-                    col = COL["X"] if p > 0 else COL["O"]
-                    cells.append(f"<span style='color:{DIM}'>{nm}</span> <span style='color:{col}'>{-p:+.1f}%</span>")
-            rg = self._regen_loss(d, base)
-            if rg is not None and abs(rg) >= 0.5:
-                col = COL["X"] if rg > 0 else COL["O"]
-                cells.append(f"<span style='color:{DIM}'>{self._regen_name}</span> <span style='color:{col}'>{-rg:+,.1f}/초</span>")
-            if spec.get("unsupported"):
-                cells.append(f"<span style='color:{COL['△']}'>PoB 미지원</span>")
-            info = QLabel("<span style='font-size:9.5pt'>" + (" ".join(cells) or f"<span style='color:{DIM}'>변화 없음</span>")
-                          + "</span>")
-            info.setTextFormat(Qt.TextFormat.RichText)
-            info.setToolTip("이 줄 하나만 빼면 이만큼 바뀌어요 (나머지는 다 켠 상태 기준)")
-            h.addWidget(info)
+                h.addWidget(b, 0, Qt.AlignmentFlag.AlignVCenter)
+            body = QVBoxLayout()
+            body.setContentsMargins(0, 0, 0, 0)
+            body.setSpacing(2)
+            for one in spec["lines"]:  # 하이브리드 옵션은 줄마다 (줄마다 기여도)
+                lh = QHBoxLayout()
+                lh.setSpacing(6)
+                txt = QLabel(html.escape(one["text"]))
+                txt.setTextFormat(Qt.TextFormat.RichText)
+                txt.setWordWrap(True)
+                txt.setToolTip(one["tip"])
+                lh.addWidget(txt, 1)
+                lh.addWidget(self._info_label(one, base))
+                body.addLayout(lh)
+            h.addLayout(body, 1)
+            from affix import badge as affix_badge
+
+            ab = affix_badge(spec.get("affix") or "")
+            if ab is not None:
+                if len(spec["lines"]) > 1:
+                    ab.setToolTip(ab.toolTip() + f" 하나 ({len(spec['lines'])}줄이 한 옵션)")
+                h.addWidget(ab, 0, Qt.AlignmentFlag.AlignVCenter)
             row.setProperty("off", key in self.off)
             self.list_host.addWidget(row)
         self.list_host.addStretch(1)
+
+    def _info_label(self, one: dict, base: dict) -> QLabel:
+        d = one["d"]
+        cells = []
+        for k, nm in ((self._dk, "DPS"), ("TotalEHP", "EHP")):
+            p = _pct(d, base, k)
+            if p is not None and abs(p) >= 0.05:
+                # d = 이 줄이 주는 몫 → 빼면 -p
+                col = COL["X"] if p > 0 else COL["O"]
+                cells.append(f"<span style='color:{DIM}'>{nm}</span> <span style='color:{col}'>{-p:+.1f}%</span>")
+        rg = self._regen_loss(d, base)
+        if rg is not None and abs(rg) >= 0.5:
+            col = COL["X"] if rg > 0 else COL["O"]
+            cells.append(f"<span style='color:{DIM}'>{self._regen_name}</span> <span style='color:{col}'>{-rg:+,.1f}/초</span>")
+        if one.get("unsupported"):
+            cells.append(f"<span style='color:{COL['△']}'>PoB 미지원</span>")
+        info = QLabel("<span style='font-size:9.5pt'>" + (" ".join(cells) or f"<span style='color:{DIM}'>변화 없음</span>")
+                      + "</span>")
+        info.setTextFormat(Qt.TextFormat.RichText)
+        info.setToolTip("이 줄 하나만 빼면 이만큼 바뀌어요 (나머지는 다 켠 상태 기준)")
+        return info
 
     _regen_name = "체젠"
 
@@ -339,11 +373,12 @@ class EquippedPanel(QWidget):
         self._regen_name = "체젠"
         return d.get("LifeRegenRecovery")
 
-    def _toggle(self, key, on: bool, row: QFrame) -> None:
-        if on:
-            self.off.discard(key)
-        else:
-            self.off.add(key)
+    def _toggle(self, keys, on: bool, row: QFrame) -> None:
+        for key in keys:  # 하이브리드 옵션은 묶인 줄을 같이
+            if on:
+                self.off.discard(key)
+            else:
+                self.off.add(key)
         row.setProperty("off", not on)
         row.style().unpolish(row)
         row.style().polish(row)

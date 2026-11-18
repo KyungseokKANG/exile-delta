@@ -276,39 +276,87 @@ class FlowLayout(QLayout):
 
 
 class ModRow(QFrame):
-    """옵션 한 줄: [켜기] [종류] 텍스트(수치는 입력칸) [✕]"""
+    """옵션 하나: [켜기] [종류] 줄들(수치는 입력칸) [접두/접미] [✕]
+    하이브리드 옵션(예: 물리 피해 % + 정확도)은 여러 줄이 한 칸 — 켜기 · 접두/접미 · 삭제도 하나."""
 
-    def __init__(self, mod: Mod, on_change, on_delete, scale_fn=None):
+    def __init__(self, mods, on_change, on_delete, scale_fn=None):
         super().__init__()
-        self._scale_fn = scale_fn  # mod → 촉매 퀄리티 배율
-        self.setObjectName("EditorRow")
-        self.mod = mod
+        mods = [mods] if isinstance(mods, Mod) else list(mods)
+        self.mods = mods
+        self.mod = mods[0]
+        mod = self.mod
         self._on_change = on_change
+        self.setObjectName("EditorRow")
         h = QHBoxLayout(self)
         h.setContentsMargins(6, 3, 6, 3)
         h.setSpacing(4)
         self.chk = QCheckBox()
         self.chk.setChecked(mod.enabled)
         self.setProperty("off", not mod.enabled)
-        self.chk.setToolTip("끄면 이 옵션 없이 계산")
+        self.chk.setToolTip("끄면 이 옵션 없이 계산" + (" (묶인 줄 모두)" if len(mods) > 1 else ""))
         self.chk.toggled.connect(self._toggle)
-        h.addWidget(self.chk)
+        h.addWidget(self.chk, 0, Qt.AlignmentFlag.AlignVCenter)
         if mod.added:
             b = QLabel("추가")
             b.setObjectName("AddedBadge")
             b.setToolTip("옵션변경 창에서 새로 추가한 옵션")
             h.addWidget(b)
-        self.mod_badge = QLabel("수정")
-        self.mod_badge.setObjectName("EditedBadge")
-        self.mod_badge.setToolTip(f"원래: {mod.orig}")
-        self.mod_badge.setVisible(not mod.added and mod.text != mod.orig)
-        h.addWidget(self.mod_badge)
         if badge(mod):
             b = QLabel(badge(mod))
             b.setObjectName("KindBadge")
             if mod.sub in SUB_COLOR:
                 b.setStyleSheet(f"color: {SUB_COLOR[mod.sub]}; border-color: {SUB_COLOR[mod.sub]};")
-            h.addWidget(b)
+            h.addWidget(b, 0, Qt.AlignmentFlag.AlignVCenter)
+        body = QVBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(2)
+        self.lines = [ModLine(m, on_change, scale_fn) for m in mods]
+        for ln in self.lines:
+            body.addWidget(ln)
+        h.addLayout(body, 1)
+        from affix import badge as affix_badge
+
+        ab = affix_badge(mod.affix)
+        if ab is not None:
+            if len(mods) > 1:
+                ab.setToolTip(ab.toolTip() + f" 하나 ({len(mods)}줄이 한 옵션)")
+            h.addWidget(ab, 0, Qt.AlignmentFlag.AlignVCenter)
+        x = QPushButton("✕")
+        x.setObjectName("RowDelete")
+        x.setFixedWidth(26)
+        x.setToolTip("옵션 삭제")
+        x.clicked.connect(lambda: on_delete(self))
+        h.addWidget(x, 0, Qt.AlignmentFlag.AlignVCenter)
+
+    @property
+    def enabled(self) -> bool:
+        return self.mod.enabled
+
+    def _toggle(self, on: bool) -> None:
+        for m in self.mods:
+            m.enabled = on
+        self.setProperty("off", not on)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self._on_change()
+
+
+class ModLine(QWidget):
+    """옵션 칸 안의 한 줄: [수정] 텍스트(수치는 입력칸) [퀄리티] [경고]"""
+
+    def __init__(self, mod: Mod, on_change, scale_fn=None):
+        super().__init__()
+        self._scale_fn = scale_fn  # mod → 촉매 퀄리티 배율
+        self.mod = mod
+        self._on_change = on_change
+        h = QHBoxLayout(self)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(4)
+        self.mod_badge = QLabel("수정")
+        self.mod_badge.setObjectName("EditedBadge")
+        self.mod_badge.setToolTip(f"원래: {mod.orig}")
+        self.mod_badge.setVisible(not mod.added and mod.text != mod.orig)
+        h.addWidget(self.mod_badge)
         self.parts: list = []  # str | QLineEdit
         last = 0
         for m in NUM_RE.finditer(mod.text):
@@ -348,12 +396,6 @@ class ModRow(QFrame):
         self.warn.setStyleSheet(f"color: {COL['△']}; font-size: 10pt;")
         h.addWidget(self.warn)
         self._update_q()
-        x = QPushButton("✕")
-        x.setObjectName("RowDelete")
-        x.setFixedWidth(26)
-        x.setToolTip("옵션 삭제")
-        x.clicked.connect(lambda: on_delete(self))
-        h.addWidget(x)
 
     def _edited(self, _t: str) -> None:
         self.mod.text = "".join(p if isinstance(p, str) else (p.text() or "0") for p in self.parts)
@@ -378,17 +420,6 @@ class ModRow(QFrame):
         else:
             self.qlab.setText(f"<span style='color:#6fd0c4'>퀄리티 포함</span>")
             self.qlab.setToolTip(f"게임 일반 복사(Ctrl+C) 수치는 이미 촉매 퀄리티 +{pct}% 가 적용된 값입니다.")
-
-    @property
-    def enabled(self) -> bool:
-        return self.mod.enabled
-
-    def _toggle(self, on: bool) -> None:
-        self.mod.enabled = on
-        self.setProperty("off", not on)
-        self.style().unpolish(self)
-        self.style().polish(self)
-        self._on_change()
 
 
 class ItemEditor(QWidget):
@@ -645,6 +676,9 @@ class ItemEditor(QWidget):
         """새 아이템으로 내용 교체 (Ctrl+C 할 때마다)."""
         self._loads += 1
         self.model = copy.deepcopy(model)
+        import affix
+
+        affix.fill(self.model, slot)
         for m in self.model.mods:
             m.orig = m.text
         self.original = copy.deepcopy(self.model)
@@ -686,16 +720,24 @@ class ItemEditor(QWidget):
                 it.widget().hide()
                 it.widget().deleteLater()
         self.rows = []
-        order = {"enchant": 0, "implicit": 1, "fractured": 2, "explicit": 3, "crafted": 4}
-        for mod in sorted(self.model.mods, key=lambda m: order.get(m.kind, 3)):
-            r = ModRow(mod, self._changed, self._delete, lambda m: cat_scalar(self.model, m))
+        from affix import sort_key
+
+        # 같은 묶음(grp) 줄은 한 칸으로
+        bundles: list[list[Mod]] = []
+        for mod in sorted(self.model.mods, key=sort_key):
+            if mod.grp and bundles and bundles[-1][0].grp == mod.grp and bundles[-1][0].kind == mod.kind:
+                bundles[-1].append(mod)
+            else:
+                bundles.append([mod])
+        for b in bundles:
+            r = ModRow(b, self._changed, self._delete, lambda m: cat_scalar(self.model, m))
             self.rows.append(r)
             self.list_host.addWidget(r)
         self.list_host.addStretch(1)
 
     def _fit(self) -> None:
         """창 크기는 아이템을 불러올 때 한 번만 정한다 (조작 중에는 크기가 바뀌지 않게, 넘치면 스크롤)."""
-        n = max(1, len(self.rows)) + 1  # 옵션 하나 추가할 여유
+        n = max(1, sum(len(r.mods) for r in self.rows)) + 1  # 옵션 하나 추가할 여유 (묶음 칸은 줄 수만큼)
         screen = QGuiApplication.screenAt(self.pos()) or QGuiApplication.primaryScreen()
         avail = screen.availableGeometry().height()
         cap = max(260, int(avail * 0.45))
@@ -721,8 +763,9 @@ class ItemEditor(QWidget):
         self._timer.start()
 
     def _delete(self, row: ModRow) -> None:
-        if row.mod in self.model.mods:
-            self.model.mods.remove(row.mod)
+        for m in row.mods:
+            if m in self.model.mods:
+                self.model.mods.remove(m)
         self._rebuild_rows()
         self._changed()
 
@@ -810,9 +853,13 @@ class ItemEditor(QWidget):
             text = ko2en.translate_mod(text) or text
         kind, _, sub = kind.partition(":")
         mod = Mod(text, kind, added=True, orig=text, sub=sub, en=en, base_vals=True)  # 새 줄은 기본 수치 → 퀄리티 적용
+        if kind in ("explicit", "crafted", "fractured"):
+            from affix import affix_of
+
+            mod.affix = affix_of(text, self.slot) or (affix_of(en, self.slot) if en else "")
         self.model.mods.append(mod)
         self._rebuild_rows()
-        row = next((r for r in self.rows if r.mod is mod), None)
+        row = next((r for r in self.rows if mod in r.mods), None)
         if row is not None:  # 새 줄이 보이도록 (레이아웃 갱신 후)
             QTimer.singleShot(0, lambda: self.scroll.ensureWidgetVisible(row))
         self._changed()
@@ -1037,7 +1084,8 @@ class ItemEditor(QWidget):
         mods = self._active_mods()
         text, miss = compose_en(self.model, mods)
         for r in self.rows:
-            r.warn.setText("번역 불가 · 계산 제외" if r.enabled and r.mod.text in miss else "")
+            for ln in r.lines:
+                ln.warn.setText("번역 불가 · 계산 제외" if r.enabled and ln.mod.text in miss else "")
         self._token += 1
         tok = self._token
         self._last_text = text
