@@ -19,7 +19,8 @@ _TAG = re.compile(r"\s*\((?:implicit|crafted|fractured|enchant|augmented|unmet|s
 _MARK = re.compile(r"\[([^\]|]+)\|([^\]]+)\]")
 _MARK1 = re.compile(r"\[([^\]|]+)\]")
 _UNSCALABLE = re.compile(r"\s*[—-]+\s*(변경이 불가능한 값|Unscalable Value)\s*$", re.I)
-TIER_KO = {"map": "일반", "maven": "메이븐", "t17": "17티어"}
+TIER_KO = {"map": "일반", "maven": "메이븐", "t17": "17티어", "implicit": "지도 고정 옵션", "corrupt": "바알 오브 타락"}
+EXTRA = ("implicit", "corrupt")  # 접두/접미가 아닌 줄 (지역에 환영의 거울 등장 · 바알 스킬 영혼 획득 방지 미적용 등)
 
 
 def skel(s: str) -> str:

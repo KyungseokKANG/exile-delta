@@ -10,6 +10,7 @@ import mapcheck
 from storage import load_settings, save_settings
 
 T17 = "#d77fe0"
+EXTRA = "#7fc7d7"  # 지도 고정 · 타락 옵션
 
 
 class MapAvoidCard:
@@ -32,7 +33,8 @@ class MapAvoidCard:
         self.search.textChanged.connect(lambda _t: self._layout())
         fr.addWidget(self.search)
         self.which = QComboBox()
-        for label, key in (("전체", ""), ("일반 지도에 나오는 것", "map"), ("17티어에만 나오는 것", "t17only")):
+        for label, key in (("전체", ""), ("일반 지도에 나오는 것", "map"), ("17티어에만 나오는 것", "t17only"),
+                           ("고정 · 타락 옵션", "extra")):
             self.which.addItem(label, key)
         self.which.currentIndexChanged.connect(lambda _i: self._layout())
         fr.addWidget(self.which)
@@ -61,10 +63,14 @@ class MapAvoidCard:
         self.boxes: list[tuple[dict, QCheckBox]] = []
         for e in mapcheck.catalog():
             only17 = e["tiers"] == ["t17"]
-            cb = QCheckBox(e["ko"] + ("   ◆17티어" if only17 else ""))
+            tag = "   ◆17티어" if only17 else "   ◇고정" if "implicit" in e["tiers"] \
+                else "   ◇타락" if "corrupt" in e["tiers"] else ""
+            cb = QCheckBox(e["ko"] + tag)
             if only17:
                 cb.setStyleSheet(f"QCheckBox {{ color: {T17}; }}")
-            where = " · ".join(mapcheck.TIER_KO[t] for t in e["tiers"])
+            elif tag:
+                cb.setStyleSheet(f"QCheckBox {{ color: {EXTRA}; }}")
+            where = " · ".join(mapcheck.TIER_KO.get(t, t) for t in e["tiers"])
             cb.setToolTip(f"{e['en']}\n나오는 곳: {where}")
             cb.setChecked(e["key"] in self.avoid)
             cb.toggled.connect(lambda on, k=e["key"]: self._toggled(k, on))
@@ -85,6 +91,8 @@ class MapAvoidCard:
             if which == "map" and "map" not in e["tiers"]:
                 continue
             if which == "t17only" and e["tiers"] != ["t17"]:
+                continue
+            if which == "extra" and not set(e["tiers"]) & set(mapcheck.EXTRA):
                 continue
             if self.only.isChecked() and not cb.isChecked():
                 continue

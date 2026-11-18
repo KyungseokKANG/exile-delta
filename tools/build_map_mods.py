@@ -1,6 +1,7 @@
 """지도 옵션 목록 (비선호 지도 체크용) → data/map_mods.json
 
-RePoE mods(영문·한글)에서 지도에 붙는 접두/접미 옵션(일반 지도·17티어·메이븐 초대장 등)을 모아
+RePoE mods(영문·한글)에서 지도에 붙는 접두/접미 옵션(일반 지도·17티어·메이븐 초대장 등)과
+지도 고정 옵션 · 바알 타락 옵션을 모아
 보상 줄(아이템 수량/희귀도/무리 규모 등)은 빼고 '위험 줄'만 남긴다. 티어끼리는 수치만 다르므로
 수치를 '#' 로 바꾼 골격이 같으면 한 줄로 묶는다.
 
@@ -93,23 +94,37 @@ def tier_of(tags: set[str]) -> str:
     return "map"
 
 
+def kind_of(key: str, m: dict) -> str | None:
+    """지도에 붙는 옵션이면 tier 이름, 아니면 None.
+    접두/접미 → map/maven/t17, 지도 고정 옵션(지역에 환영의 거울 등장 등) → implicit,
+    바알 오브 타락 옵션(바알 스킬 영혼 획득 방지 미적용 등) → corrupt."""
+    if m.get("domain") != "area":
+        return None
+    tags = {w["tag"].strip() for w in m.get("spawn_weights", []) if w.get("weight", 0) > 0}
+    g = m.get("generation_type")
+    if g in ("prefix", "suffix"):
+        return tier_of(tags) if tags & TAGS else None
+    if g == "corrupted" and "default" in tags:
+        return "corrupt"
+    if g == "unique" and key.startswith("EverythingSomewhere") and "default" in tags:
+        return "implicit"
+    return None
+
+
 def main() -> None:
     refresh = "--refresh" in sys.argv
     en = db.fetch("mods.min.json", refresh)
     ko = db.fetch("Korean/mods.min.json", refresh)
     out: dict[str, dict] = {}
-    rank = {"map": 0, "maven": 1, "t17": 2}
+    rank = {"map": 0, "maven": 1, "t17": 2, "implicit": 3, "corrupt": 4}
     for key, m in en.items():
-        if m.get("domain") != "area" or m.get("generation_type") not in ("prefix", "suffix"):
-            continue
-        tags = {w["tag"].strip() for w in m.get("spawn_weights", []) if w.get("weight", 0) > 0}
-        if not tags & TAGS:
+        t = kind_of(key, m)
+        if t is None:
             continue
         el = [x for x in (m.get("text") or "").split("\n") if x.strip()]
         kl = [x for x in ((ko.get(key) or {}).get("text") or "").split("\n") if x.strip()]
         if len(el) != len(kl):
             kl = [""] * len(el)
-        t = tier_of(tags)
         for e, k in zip(el, kl):
             if REWARD.search(e):
                 continue
