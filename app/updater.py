@@ -76,6 +76,7 @@ class Updater(QObject):
             return ("test", tag)
 
         def on_progress(d, t, m):
+            self.page.set_pob_update(m, d, t)
             if manual or d == 0:
                 self.message.emit(m)
 
@@ -84,16 +85,20 @@ class Updater(QObject):
             self._stamp("pob_update_at")
             if kind == "latest":
                 self.pob_running = False
+                self.page.set_pob_update("")
                 if manual:
                     self.message.emit(f"PoB {tag} — 이미 최신 버전입니다")
             elif kind == "bad":
                 self.pob_running = False
+                self.page.set_pob_update("")
             else:
                 self.message.emit(f"PoB {tag} 받음 — 호환성 점검 중 (지금 버전은 그대로 사용 가능)")
+                self.page.set_pob_update(f"{tag} 받기 완료, 내 캐릭터로 계산 점검 중… (1~2분)")
                 self._selftest(tag)
 
         def fail(msg):
             self.pob_running = False
+            self.page.set_pob_update("")
             if manual:
                 self.message.emit(f"PoB 업데이트 확인 실패: {msg}")
 
@@ -178,6 +183,7 @@ class Updater(QObject):
             self.test.deleteLater()
             self.test = None
         self.pob_running = False
+        self.page.set_pob_update("")
 
     def _pass(self) -> None:
         tag = self.tag

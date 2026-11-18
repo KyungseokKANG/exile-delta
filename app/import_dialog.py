@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QStackedWidget,
     QToolButton,
@@ -81,6 +82,12 @@ class ImportDialog(FramelessDialog):
         self.status.setObjectName("DialogSub")
         self.status.setWordWrap(True)
         body.addWidget(self.status)
+        self.busy_bar = QProgressBar()
+        self.busy_bar.setRange(0, 0)
+        self.busy_bar.setTextVisible(False)
+        self.busy_bar.setFixedHeight(6)
+        self.busy_bar.hide()
+        body.addWidget(self.busy_bar)
 
         bh = QHBoxLayout()
         bh.addStretch(1)
@@ -152,16 +159,23 @@ class ImportDialog(FramelessDialog):
         self.settings["import_mode"] = i
         self._set_status("")
 
-    def _set_status(self, text: str, error: bool = False) -> None:
+    def _set_status(self, text: str, error: bool = False, big: bool = False) -> None:
         self.status.setText(text)
-        self.status.setStyleSheet("color: #ff8f78;" if error else "")
+        if error:
+            self.status.setStyleSheet("color: #ff8f78;")
+        elif big:
+            self.status.setStyleSheet("color: #ead197; font-size: 15px; font-weight: bold;")
+        else:
+            self.status.setStyleSheet("")
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self._busy = busy
         self.ok_btn.setEnabled(not busy)
+        self.ok_btn.setText("가져오는 중…" if busy else "가져오기")
         self.list_btn.setEnabled(not busy)
+        self.busy_bar.setVisible(busy)
         if text:
-            self._set_status(text)
+            self._set_status(text, big=busy)
 
     # ---- 계정 ----
     def _load_list(self) -> None:

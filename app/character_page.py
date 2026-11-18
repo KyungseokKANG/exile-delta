@@ -150,6 +150,7 @@ class CharacterPage(QWidget):
         self.store = CharacterStore()
         self.loaded_id: str | None = None
         self._installing = False
+        self._pob_upd: tuple[str, int, int] | None = None  # 백그라운드 PoB 업데이트 진행 (문구, 받은 양, 전체)
         self._tree_win = None
         # 되돌리기: 캐릭터별 이전 빌드 XML 스택 / 방금 바꾼 것의 효과
         self._hist: dict[str, list[dict]] = {}
@@ -397,6 +398,14 @@ class CharacterPage(QWidget):
         sk_row.addLayout(chk_box)
         sk_row.addStretch(1)
         hv.addLayout(sk_row)
+        # DPS 가 0 일 때 (오라 그룹이 주 스킬로 잡힘 등) 무엇을 고치면 되는지 안내
+        self.dps_hint = QLabel()
+        self.dps_hint.setTextFormat(Qt.TextFormat.RichText)
+        self.dps_hint.setWordWrap(True)
+        self.dps_hint.setStyleSheet("background: #2a1c12; border: 1px solid #8a5a2a; border-radius: 8px;"
+                                    " padding: 8px 10px; color: #f0d9b0;")
+        self.dps_hint.hide()
+        hv.addWidget(self.dps_hint)
         self.res_label = QLabel()
         self.res_label.setObjectName("DefLine")
         self.res_label.setTextFormat(Qt.TextFormat.RichText)
@@ -569,6 +578,7 @@ class CharacterPage(QWidget):
             return
         if st == "ready":
             self.banner.hide()
+            self._show_pob_update()
             self.equip.cid = None  # 엔진이 새로 떴으면 장비·기여도 전부 다시
             self._ensure_loaded()
             tw = self._tree_win
@@ -592,6 +602,41 @@ class CharacterPage(QWidget):
             self.banner_text.setText(msg or "PoB 엔진이 실행 중이 아닙니다")
             self.banner_btn.setText("엔진 다시 시작")
             self.banner_btn.show()
+
+    def set_pob_update(self, text: str, done: int = 0, total: int = 0) -> None:
+        """백그라운드 PoB 업데이트 진행 상황을 위쪽 배너에 크게 보여준다. text 가 비면 배너를 닫는다."""
+        self._pob_upd = (text, done, total) if text else None
+        self._show_pob_update()
+
+    def set_task(self, title: str = "", sub: str = "") -> None:
+        """가져오기처럼 사용자가 기다리는 작업을 위쪽 배너에 크게 보여준다. title 이 비면 닫는다."""
+        self._task = (title, sub) if title else None
+        self._show_pob_update()
+
+    def _show_pob_update(self) -> None:
+        if self._installing or self.client.state != "ready":
+            return  # 엔진 설치·오류 안내가 우선
+        task = getattr(self, "_task", None)
+        if task is None and self._pob_upd is None:
+            self.banner.hide()
+            return
+        self.banner.show()
+        self.banner_btn.hide()
+        self.banner_bar.show()
+        if task is not None:
+            self.banner_bar.setRange(0, 0)
+            title, sub = task
+            self.banner_text.setText(f"<span style='font-size:15px'><b>{title}</b></span>"
+                                     + (f"<br><span style='color:#9a8f7a'>{sub}</span>" if sub else ""))
+            return
+        text, d, t = self._pob_upd
+        if t > 0:
+            self.banner_bar.setRange(0, t)
+            self.banner_bar.setValue(d)
+        else:
+            self.banner_bar.setRange(0, 0)
+        self.banner_text.setText(f"<span style='font-size:15px'><b>PoB 업데이트 중</b></span> — {text}<br>"
+                                 "<span style='color:#9a8f7a'>지금 버전으로 계속 써도 돼요. 끝나면 자동으로 넘어가요.</span>")
 
     def install_engine(self, force_check: bool = False) -> None:
         if self.client.state not in ("missing",) and not force_check:
@@ -846,8 +891,12 @@ class CharacterPage(QWidget):
                 args["prev_xml"] = prev  # Full DPS·젬 사용·설정·플라스크 등 사용자가 고른 것 유지
         if not quiet:
             self.flash("PoB 로 빌드 계산 중…")
+            self.set_task(f"{name or '빌드'} 가져오는 중… PoB 로 계산하고 있어요",
+                          "패시브 트리 · 장비 · 스킬을 불러와 DPS · EHP 를 계산합니다 (몇 초 걸려요)")
 
         def ok(r):
+            if not quiet:
+                self.set_task()
             s = r.get("summary") or {}
             nm = name or f"{s.get('ascendClassName') or s.get('className') or 'PoB 빌드'} Lv{s.get('level', '?')}"
             if existing_id:
@@ -881,6 +930,8 @@ class CharacterPage(QWidget):
 
         def err(msg):
             self.loaded_id = None
+            if not quiet:
+                self.set_task()
             if after:
                 after(False, str(msg))
             if quiet:
@@ -1036,6 +1087,7 @@ class CharacterPage(QWidget):
             ch = src["character"]
             if not auto:
                 self.flash(f"{c['name']} 최신 정보 받는 중…")
+                self.set_task(f"{c['name']} 다시 가져오는 중…", "pathofexile.com 에서 최신 장비 · 트리 · 스킬을 받고 있어요")
             import time as _t
 
             self._auto_busy = True
@@ -1045,6 +1097,8 @@ class CharacterPage(QWidget):
                 self._auto_busy = False
                 cur, js = res
                 sig = self._data_sig(js)
+                if not auto:
+                    self.set_task()
                 if auto and self._auto_sig.get(c["id"]) == sig:
                     return self._auto_status(f"확인 · 변경 없음 (Lv {cur.get('level')})")
                 if auto and self._edited(c):
@@ -1068,15 +1122,22 @@ class CharacterPage(QWidget):
                 if auto:
                     self._auto_status("받기 실패 — 다음 회차에 다시", m)
                 else:
+                    self.set_task()
                     info(self, "다시 가져오기 실패", m)
 
             run_async(lambda: importers.refetch_character(src["account"], src["realm"], ch, auto=auto), got, fail)
         elif src.get("link"):
             self.flash(f"{c['name']} 링크에서 다시 받는 중…")
+            self.set_task(f"{c['name']} 다시 가져오는 중…", "빌드 링크에서 다시 받고 있어요")
+
+            def link_fail(m):
+                self.set_task()
+                info(self, "다시 가져오기 실패", m)
+
             run_async(
                 lambda: importers.resolve_code_or_link(src["link"]),
                 lambda res: self._import_payload("xml", res[0], c["name"], src, c["id"]),
-                lambda m: info(self, "다시 가져오기 실패", m),
+                link_fail,
             )
         else:
             info(self, "다시 가져오기", "PoB 코드로 등록한 캐릭터는 새 코드로 다시 등록해 주세요.")
@@ -1122,6 +1183,15 @@ class CharacterPage(QWidget):
             en_main = "Vaal " + en_main if skillnames.ko("Vaal " + en_main) != "Vaal " + en_main else en_main
         main_name = skillnames.ko(en_main)
         n_full = sum(1 for g in (s.get("groups") or []) if g.get("includeInFullDPS"))
+        no_dps = bool(st) and not st.get("FullDPS") and not st.get("CombinedDPS") and not st.get("MinionDPS")
+        self.dps_hint.setVisible(no_dps)
+        if no_dps:
+            what = f"지금 계산 중인 스킬(<b>{html.escape(main_name or '없음')}</b>)은 피해를 주지 않는 스킬이라 DPS 가 0 이에요."
+            self.dps_hint.setText(
+                f"<b style='color:#ffb35c'>⚠ DPS 가 0 으로 나와요</b><br>{what}<br>"
+                "· 바로 위 <b>'계산할 스킬 그룹'</b>에서 주력 공격 · 주문 스킬을 골라 주세요.<br>"
+                "· 여러 스킬을 합쳐 보려면 <b>스킬 · 젬</b> 탭에서 쓰는 스킬의 <b>Full DPS</b> 를 체크하세요. "
+                "아이템 비교는 Full DPS 가 있으면 그걸 기준으로 해요.")
         for k, tile in self.tiles.items():
             v = st.get(k)
             sub = ""

@@ -309,6 +309,50 @@ local function fixMainActive()
 	frame()
 end
 
+-- 처음 가져올 때 주 스킬 고르기. PoB 는 '젬이 가장 많은 그룹'만 봐서 오라 묶음이 뽑히기도 함 →
+-- 링크 많은 순으로 후보를 보고 실제 DPS 가 나오는 첫 그룹 (링크 수가 같으면 DPS 높은 쪽). 다 0 이면 PoB 선택 유지.
+local function guessMainGroup()
+	local list = build.skillsTab.socketGroupList
+	local cands = { }
+	for i, g in ipairs(list) do
+		if g.enabled ~= false and g.displaySkillList and #g.displaySkillList > 0 then
+			local n = 0
+			for _, gem in ipairs(g.gemList or { }) do
+				if gem.enabled ~= false then n = n + 1 end
+			end
+			cands[#cands + 1] = { i = i, n = n }
+		end
+	end
+	if #cands < 2 then return end
+	table.sort(cands, function(a, b) if a.n ~= b.n then return a.n > b.n end return a.i < b.i end)
+	local orig = build.mainSocketGroup
+	local origActive = list[orig] and list[orig].mainActiveSkill
+	local bestIdx, bestN, bestDps, bestActive = nil, -1, 0, nil
+	for k = 1, math.min(#cands, 8) do
+		local c = cands[k]
+		if bestIdx and c.n < bestN then break end
+		build.mainSocketGroup = c.i
+		build.modFlag = true
+		build.buildFlag = true
+		frame()
+		fixMainActive()
+		local d = mainDPS()
+		if d > bestDps then
+			bestIdx, bestN, bestDps, bestActive = c.i, c.n, d, list[c.i].mainActiveSkill
+		end
+	end
+	if bestIdx then
+		build.mainSocketGroup = bestIdx
+		list[bestIdx].mainActiveSkill = bestActive
+	else
+		build.mainSocketGroup = orig
+		if list[orig] then list[orig].mainActiveSkill = origActive end
+	end
+	build.modFlag = true
+	build.buildFlag = true
+	frame()
+end
+
 function es_load_xml(xmlText, name)
 	-- 예전에 가져와 저장된 빌드: 바알 젬 일반 쪽이 enableGlobal2="nil" 로 저장돼 있음 → 켬
 	xmlText = xmlText:gsub('enableGlobal2="nil"', 'enableGlobal2="true"')
@@ -437,6 +481,9 @@ function es_load_character_json(json, prevXml)
 	if prefs then
 		local ok, e = pcall(es_apply_prefs, prefs)
 		if not ok then _ES_LOG("apply prefs: " .. tostring(e)) end
+	else
+		local ok, e = pcall(guessMainGroup)
+		if not ok then _ES_LOG("guess main: " .. tostring(e)) end
 	end
 	pcall(fixMainActive)
 	return true
