@@ -150,7 +150,6 @@ class CharacterPage(QWidget):
         self.store = CharacterStore()
         self.loaded_id: str | None = None
         self._installing = False
-        self._pob_upd: tuple[str, int, int] | None = None  # 백그라운드 PoB 업데이트 진행 (문구, 받은 양, 전체)
         self._tree_win = None
         # 되돌리기: 캐릭터별 이전 빌드 XML 스택 / 방금 바꾼 것의 효과
         self._hist: dict[str, list[dict]] = {}
@@ -603,11 +602,6 @@ class CharacterPage(QWidget):
             self.banner_btn.setText("엔진 다시 시작")
             self.banner_btn.show()
 
-    def set_pob_update(self, text: str, done: int = 0, total: int = 0) -> None:
-        """백그라운드 PoB 업데이트 진행 상황을 위쪽 배너에 크게 보여준다. text 가 비면 배너를 닫는다."""
-        self._pob_upd = (text, done, total) if text else None
-        self._show_pob_update()
-
     def set_task(self, title: str = "", sub: str = "") -> None:
         """가져오기처럼 사용자가 기다리는 작업을 위쪽 배너에 크게 보여준다. title 이 비면 닫는다."""
         self._task = (title, sub) if title else None
@@ -617,26 +611,16 @@ class CharacterPage(QWidget):
         if self._installing or self.client.state != "ready":
             return  # 엔진 설치·오류 안내가 우선
         task = getattr(self, "_task", None)
-        if task is None and self._pob_upd is None:
+        if task is None:
             self.banner.hide()
             return
         self.banner.show()
         self.banner_btn.hide()
         self.banner_bar.show()
-        if task is not None:
-            self.banner_bar.setRange(0, 0)
-            title, sub = task
-            self.banner_text.setText(f"<span style='font-size:15px'><b>{title}</b></span>"
-                                     + (f"<br><span style='color:#9a8f7a'>{sub}</span>" if sub else ""))
-            return
-        text, d, t = self._pob_upd
-        if t > 0:
-            self.banner_bar.setRange(0, t)
-            self.banner_bar.setValue(d)
-        else:
-            self.banner_bar.setRange(0, 0)
-        self.banner_text.setText(f"<span style='font-size:15px'><b>PoB 업데이트 중</b></span> — {text}<br>"
-                                 "<span style='color:#9a8f7a'>지금 버전으로 계속 써도 돼요. 끝나면 자동으로 넘어가요.</span>")
+        self.banner_bar.setRange(0, 0)
+        title, sub = task
+        self.banner_text.setText(f"<span style='font-size:15px'><b>{title}</b></span>"
+                                 + (f"<br><span style='color:#9a8f7a'>{sub}</span>" if sub else ""))
 
     def install_engine(self, force_check: bool = False) -> None:
         if self.client.state not in ("missing",) and not force_check:

@@ -294,11 +294,17 @@ class StartupUpdater:
     """시작할 때 한 번: 업데이트 확인 → (처음 실행이면 바로, 아니면 물어보고) 설치 → 재시작.
     끝나면(업데이트 없음 · 나중에 · 실패) after() 호출 — 이어서 PoB 엔진 설치 등."""
 
-    def __init__(self, win, after, manual: bool = False, direct: bool = False):
+    def __init__(self, win, after, manual: bool = False, direct: bool = False, report=None):
         self.win = win
         self.after = after
         self.manual = manual
         self.direct = direct  # 이미 내역 창에서 '지금 업데이트'를 누름 → 다시 묻지 않음
+        self.report = report  # report(state, detail): 시작 점검 패널에 진행 상황 표시
+        self._final: tuple[str, str] | None = None
+
+    def _rep(self, state: str, detail: str) -> None:
+        if self.report is not None:
+            self.report(state, detail)
 
     def start(self) -> None:
         from asyncjob import run_async
@@ -306,7 +312,9 @@ class StartupUpdater:
         if not enabled():
             if self.manual:
                 self._info("프로그램 업데이트", "개발 모드로 실행 중이라 업데이트를 확인하지 않습니다.")
+            self._rep("ok", "개발 모드라 건너뜀")
             return self.after()
+        self._rep("run", f"GitHub 에서 새 버전 확인 중… (지금 v{VERSION})")
         def job():
             inf = latest()
             if inf and vt(inf["version"]) > vt(VERSION):
@@ -326,6 +334,7 @@ class StartupUpdater:
     def _fail(self, msg: str) -> None:
         if self.manual:
             self._info("업데이트 확인 실패", f"GitHub 에 연결하지 못했습니다.\n{msg}")
+        self._rep("warn", f"확인 실패 — 지금 버전(v{VERSION})으로 계속해요 ({msg})")
         self.after()
 
     def _got(self, inf) -> None:
@@ -336,15 +345,21 @@ class StartupUpdater:
         first = not s.get("app_update_seen")
         if not first and not self.manual and s.get("app_update_skip") == (inf or {}).get("version"):
             what = "none"  # '이 버전 건너뛰기'
+            self._final = ("ok", f"v{inf['version']} 은 건너뛰기로 해 둠 (지금 v{VERSION})")
         if what == "none":
             if self.manual:
                 self._info("프로그램 업데이트", f"최신 버전입니다 (v{VERSION}).")
+            self._final = self._final or ("ok", f"최신 버전이에요 (v{VERSION})")
             return self._done()
         if what == "bad":
             if self.manual:
                 self._info("프로그램 업데이트", f"v{inf['version']} 은 이 PC 에서 시작에 실패해서 건너뜁니다.")
+            self._final = ("warn", f"v{inf['version']} 은 이 PC 에서 안 켜져서 건너뜀 (지금 v{VERSION})")
             return self._done()
+        self._rep("run", f"새 버전 v{inf['version']} 이 있어요 — 업데이트 창을 확인해 주세요")
+        self._final = ("ok", f"v{inf['version']} 은 나중에 (지금 v{VERSION}, 아래쪽 버튼으로 언제든 업데이트)")
         if what == "exe":
+            self._final = ("warn", f"v{inf['version']} 은 프로그램을 새로 받아야 해요")
             from dialogs import confirm
 
             if confirm(self.win, "새 설치 파일 필요",
@@ -381,6 +396,8 @@ class StartupUpdater:
 
         from asyncjob import run_async
 
+        self._rep("run", f"v{inf['version']} 받는 중… 끝나면 알아서 다시 켜져요")
+        self._final = ("warn", f"업데이트 설치 실패 — 지금 v{VERSION} 으로 계속해요")
         head = f"최신 버전(v{inf['version']})으로 맞추는 중이에요.\n끝나면 프로그램이 알아서 다시 켜져요."
         dlg = QProgressDialog(head, "", 0, 0, self.win)
         dlg.setWindowTitle("프로그램 업데이트")
@@ -420,6 +437,7 @@ class StartupUpdater:
         if not s.get("app_update_seen"):
             s["app_update_seen"] = True
             save_settings(s)
+        self._rep(*(self._final or ("ok", "확인 끝")))
         self.after()
 
 

@@ -67,6 +67,10 @@ def main() -> int:
 
             self.titlebar = TitleBar(self, SECTIONS)
             v.addWidget(self.titlebar)
+            from startup_panel import StartupChecks
+
+            self.checks = StartupChecks(self)
+            v.addWidget(self.checks)
             self.pages = QStackedWidget()
             v.addWidget(self.pages, 1)
 
@@ -154,20 +158,27 @@ def main() -> int:
             QApplication.instance().installEventFilter(self)
             self._restore_geometry()
             QTimer.singleShot(0, self.client.start)
-            # 자동 업데이트 (PoB 엔진: 점검 후 전환 / 번역 사전) — 시작 직후 부담을 피해 잠시 뒤에
+            # 자동 업데이트 (PoB 엔진: 점검 후 전환 / 번역 사전) — 프로그램 업데이트 확인이 끝나면 바로
             from updater import Updater
 
             self.updater = Updater(self.client, self.char_page, self)
             self.updater.message.connect(self.flash)
             self.char_page.updater = self.updater
-            QTimer.singleShot(20000, self.updater.auto)
-            # 프로그램 업데이트(내 GitHub 릴리스) 확인 → 끝나면 PoB 엔진이 없을 때 자동 설치
+            self.updater.checks = self.checks
+            # 시작 점검 (화면 위쪽에 크게): ① 프로그램 업데이트 → ② PoB 엔진 켜기(동시에) → ③ PoB 새 버전 → ④ 번역 데이터
+            ck = self.checks
+            ck.step("app", "프로그램 업데이트 확인", "wait", "곧 시작해요")
+            ck.step("engine", "PoB 엔진 켜기", "run", "계산 엔진을 켜는 중…")
+            ck.step("pob", "PoB 새 버전 확인", "wait", "프로그램 업데이트 확인 다음에 해요")
+            ck.step("dict", "번역 데이터 확인", "wait", "PoB 확인과 같이 해요")
             import app_update
 
             self._app_update = app_update
             # (객체를 self 에 붙잡아 둬야 결과 신호를 받기 전에 사라지지 않음)
-            self._app_up = app_update.StartupUpdater(self, self._after_app_update)
-            QTimer.singleShot(1200, self._app_up.start)
+            self._app_up = app_update.StartupUpdater(
+                self, self._after_app_update,
+                report=lambda st, d: ck.step("app", "프로그램 업데이트 확인", st, d))
+            QTimer.singleShot(300, self._app_up.start)
             self._app_poll = QTimer(self, interval=10 * 60 * 1000, timeout=self._poll_app_update)
             self._app_poll.start()
             QTimer.singleShot(6000, app_update.mark_ok)  # 창이 뜨고 잘 돌면 '정상 시작' 표시 (로더의 되돌리기 판단용)
@@ -191,6 +202,7 @@ def main() -> int:
             run_async(app_update.latest, got, lambda m: None)
 
         def _after_app_update(self) -> None:
+            self.updater.auto()  # 프로그램이 최신이면 바로 PoB 새 버전 · 번역 데이터 확인
             self._poll_app_update()  # 시작할 때 '나중에'를 눌렀어도 버튼은 보이게
             if self.client.state == "missing" and not getattr(self.char_page, "_installing", False):
                 self.char_page.install_engine()  # 처음 실행: 버튼 누를 필요 없이 바로 PoB 엔진 받기
@@ -347,6 +359,17 @@ def main() -> int:
             self.engine_label.setToolTip(msg)
             if msg and st in ("error",):
                 self.flash(msg)
+            # 시작 점검 패널: 엔진이 처음 켜질 때(또는 PoB 업데이트 뒤 다시 켜질 때)까지만
+            ck = getattr(self, "checks", None)
+            if ck is not None and "engine" in ck.steps:
+                if st == "starting":
+                    ck.step("engine", "PoB 엔진 켜기", "run", msg or "계산 엔진을 켜는 중… (처음엔 10초쯤)")
+                elif st == "ready":
+                    ck.step("engine", "PoB 엔진 켜기", "ok", f"준비됐어요 (PoB {self.client.version})")
+                elif st == "missing":
+                    ck.step("engine", "PoB 엔진 켜기", "warn", "PoB 엔진이 없어요 — 캐릭터 화면에서 설치를 진행해요")
+                elif st == "error":
+                    ck.step("engine", "PoB 엔진 켜기", "fail", msg or "엔진을 켜지 못했어요")
 
         # ---------- 창 ----------
         def _restore_geometry(self) -> None:

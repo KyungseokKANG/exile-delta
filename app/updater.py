@@ -35,6 +35,7 @@ class Updater(QObject):
         self.pob_running = False
         self.dict_running = False
         self.test: PobClient | None = None
+        self.checks = None  # 시작 점검 패널 (main 에서 붙임)
         self._timeout = QTimer(self, singleShot=True, interval=TEST_TIMEOUT_MS, timeout=lambda: self._fail("시간 초과"))
 
     def _stamp(self, key: str) -> None:
@@ -42,13 +43,25 @@ class Updater(QObject):
         s[key] = time.time()
         save_settings(s)
 
+    def _pob_step(self, state: str, detail: str = "", done: int = 0, total: int = 0) -> None:
+        if self.checks is not None:
+            self.checks.step("pob", "PoB 새 버전 확인", state, detail, done, total)
+
+    def _dict_step(self, state: str, detail: str = "") -> None:
+        if self.checks is not None:
+            self.checks.step("dict", "번역 데이터 확인", state, detail)
+
     def auto(self) -> None:
         s = load_settings()
         now = time.time()
         if installer.installed():  # PoB 새 버전은 켤 때마다 확인 (리그 시작·패치 날 바로 반영)
             self.check_pob(manual=False)
+        else:
+            self._pob_step("ok", "PoB 엔진을 처음 설치해요 (아래 안내 참고)")
         if now - float(s.get("dict_update_at", 0)) > DICT_EVERY:
             self.update_dict(manual=False)
+        else:
+            self._dict_step("ok", "최근에 확인함 (3일마다 확인)")
 
     # ================================================================ PoB
     def check_pob(self, manual: bool = True) -> None:
@@ -60,6 +73,7 @@ class Updater(QObject):
             self.page.install_engine()
             return
         self.pob_running = True
+        self._pob_step("run", "GitHub 에서 최신 PoB 버전 확인 중…")
         if manual:
             self.message.emit("PoB 최신 버전 확인 중…")
 
@@ -76,7 +90,7 @@ class Updater(QObject):
             return ("test", tag)
 
         def on_progress(d, t, m):
-            self.page.set_pob_update(m, d, t)
+            self._pob_step("run", f"새 버전 받는 중 — {m}  (지금 버전으로 계속 써도 돼요)", d, t)
             if manual or d == 0:
                 self.message.emit(m)
 
@@ -85,20 +99,21 @@ class Updater(QObject):
             self._stamp("pob_update_at")
             if kind == "latest":
                 self.pob_running = False
-                self.page.set_pob_update("")
+                self._pob_step("ok", f"최신 버전이에요 ({tag})")
                 if manual:
                     self.message.emit(f"PoB {tag} — 이미 최신 버전입니다")
             elif kind == "bad":
                 self.pob_running = False
-                self.page.set_pob_update("")
+                cur = installer.installed()
+                self._pob_step("warn", f"{tag} 는 아직 이 앱과 안 맞아서 {cur[0] if cur else '지금'} 버전을 써요")
             else:
                 self.message.emit(f"PoB {tag} 받음 — 호환성 점검 중 (지금 버전은 그대로 사용 가능)")
-                self.page.set_pob_update(f"{tag} 받기 완료, 내 캐릭터로 계산 점검 중… (1~2분)")
+                self._pob_step("run", f"{tag} 받기 완료 — 내 캐릭터로 계산 점검 중… (1~2분, 지금 버전으로 계속 써도 돼요)")
                 self._selftest(tag)
 
         def fail(msg):
             self.pob_running = False
-            self.page.set_pob_update("")
+            self._pob_step("warn", f"확인 실패 — 지금 버전으로 계속 써요 ({msg})")
             if manual:
                 self.message.emit(f"PoB 업데이트 확인 실패: {msg}")
 
@@ -183,7 +198,6 @@ class Updater(QObject):
             self.test.deleteLater()
             self.test = None
         self.pob_running = False
-        self.page.set_pob_update("")
 
     def _pass(self) -> None:
         tag = self.tag
@@ -191,8 +205,10 @@ class Updater(QObject):
         try:
             installer.activate(tag)
         except OSError as e:
+            self._pob_step("warn", f"{tag} 전환 실패 — 지금 버전으로 계속 써요 ({e})")
             self.message.emit(f"PoB {tag} 전환 실패: {e}")
             return
+        self._pob_step("ok", f"{tag} 로 업데이트했어요 (점검 통과) — 엔진 다시 켜는 중")
         self.message.emit(f"PoB {tag} 로 자동 업데이트됨 (점검 통과) — 엔진 다시 시작")
         self.client.start()
 
@@ -203,6 +219,7 @@ class Updater(QObject):
         self._end_test()
         installer.mark_bad(tag, str(msg))
         cur = installer.installed()
+        self._pob_step("warn", f"{tag} 는 아직 이 앱과 안 맞아서 {cur[0] if cur else '지금'} 버전을 계속 써요")
         self.message.emit(f"PoB {tag} 는 아직 이 앱과 호환되지 않아 {cur[0] if cur else '지금'} 버전을 계속 씁니다 ({msg})")
 
     def rollback(self) -> None:
@@ -218,6 +235,7 @@ class Updater(QObject):
         if self.dict_running:
             return
         self.dict_running = True
+        self._dict_step("run", "새 리그 옵션 번역이 바뀌었는지 확인 중… (처음엔 몇 분 걸릴 수 있어요)")
         if manual:
             self.message.emit("번역 데이터 갱신 확인 중… (처음에는 약 90MB 를 받습니다)")
 
@@ -254,12 +272,16 @@ class Updater(QObject):
                 import ko2en
 
                 ko2en.reload()
+                self._dict_step("ok", "새 리그 옵션 번역을 반영했어요")
                 self.message.emit("번역 데이터 새로 갱신됨 (새 리그 옵션 반영)")
-            elif manual:
-                self.message.emit("번역 데이터 — 바뀐 내용 없음 (최신)")
+            else:
+                self._dict_step("ok", "바뀐 내용 없음 (최신)")
+                if manual:
+                    self.message.emit("번역 데이터 — 바뀐 내용 없음 (최신)")
 
         def fail(msg):
             self.dict_running = False
+            self._dict_step("warn", f"확인 실패 — 지금 데이터로 계속 써요 ({msg})")
             if manual:
                 self.message.emit(f"번역 데이터 갱신 실패: {msg}")
 
