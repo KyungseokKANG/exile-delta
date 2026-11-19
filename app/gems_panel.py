@@ -7,8 +7,8 @@ from __future__ import annotations
 import html
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QRadioButton, QSpinBox,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
+                               QRadioButton, QSpinBox, QVBoxLayout, QWidget)
 
 from pob import config_ko
 
@@ -132,11 +132,36 @@ class GemsCard:
             return ""
         return f"<span style='color:#c8a96a'>{label}</span> " + " &nbsp;".join(cells)
 
+    @staticmethod
+    def _clear(lay) -> None:
+        """레이아웃 비우기 — 안에 든 하위 레이아웃(레벨·퀄리티·단계 칸 묶음)의 위젯까지 지움."""
+        while lay.count():
+            it = lay.takeAt(0)
+            w = it.widget()
+            if w:
+                w.hide()
+                w.deleteLater()
+            elif it.layout():
+                GemsCard._clear(it.layout())
+                it.layout().deleteLater()
+
     def render(self) -> None:
-        while self.grid.count():
-            it = self.grid.takeAt(0)
-            if it.widget():
-                it.widget().deleteLater()
+        # 다시 그려도 스크롤 위치 그대로: 입력 중인 칸이 지워지면 포커스가 다른 칸(맨 밑 등)으로 넘어가며
+        # 스크롤이 따라가고, 내용이 잠깐 비면서 위치도 줄어듦 → 포커스를 먼저 빼고, 다 그린 뒤 위치 복원
+        sb = self.page.scroll.verticalScrollBar()
+        pos = sb.value()
+        host = self.grid.parentWidget()
+        fw = QApplication.focusWidget()
+        if fw is not None and host is not None and host.isAncestorOf(fw):
+            fw.clearFocus()
+        try:
+            self._render()
+        finally:
+            sb.setValue(pos)
+            QTimer.singleShot(0, lambda: sb.setValue(pos))
+
+    def _render(self) -> None:
+        self._clear(self.grid)
         c = self.page._cur() or {}
         s = c.get("summary") or {}
         groups = s.get("groups") or []
@@ -206,7 +231,10 @@ class GemsCard:
                 row += 1
             self.grid.addWidget(h, row, 0, 1, 5)
             row += 1
-            for ii, under, orphan in self._order(g, gems):
+            knobs = g.get("knobs") or []
+            if isinstance(knobs, dict):  # (Lua 표 → 번호 키 dict 로 올 때)
+                knobs = [knobs[k] for k in sorted(knobs, key=lambda x: int(x))]
+            for ii, under, orphan, sk in self._order(g, gems):
                 gem = gems[ii - 1]
                 from_item = bool(gem.get("fromItem"))
                 chk = QCheckBox()
@@ -250,6 +278,15 @@ class GemsCard:
                 box.setSpacing(6)
                 box.addWidget(lv)
                 box.addWidget(qu)
+                # 단계 수 · 활성 지뢰 수 · 토템 수 — 상단 주 스킬 줄과 같은 값 (한쪽 바꾸면 같이 바뀜)
+                kn = knobs[sk - 1] if 0 < sk <= len(knobs) and isinstance(knobs[sk - 1], dict) else None
+                import skill_knobs
+                for key, val, lo, hi in skill_knobs.spins(kn):
+                    sp = skill_knobs.make_spin(
+                        key, val, lo, hi, lambda k, v, gi=gi, sk=sk: self.page.set_skill_knob(gi, sk, k, v), kn)
+                    sp.setPrefix(skill_knobs.label(key, kn) + " ")
+                    sp.setEnabled(ready)
+                    box.addWidget(sp)
                 self.grid.addLayout(box, row, 2)
                 e = imp.get((gi, ii))
                 if e:
@@ -284,13 +321,13 @@ class GemsCard:
         if isinstance(links, dict):  # (빈 Lua 표는 {} 로 옴)
             links = list(links.values())
         if not links:
-            return [(i, False, False) for i in range(1, len(gems) + 1)]
+            return [(i, False, False, 0) for i in range(1, len(gems) + 1)]
         out, used = [], set()
         for ln in links:
             a = int(ln.get("active") or 0)
             if not 1 <= a <= len(gems):
                 continue
-            out.append((a, False, False))
+            out.append((a, False, False, int(ln.get("skill") or 0)))
             used.add(a)
             sups = ln.get("supports") or []
             if isinstance(sups, dict):
@@ -298,14 +335,14 @@ class GemsCard:
             for sidx in sups:
                 sidx = int(sidx)
                 if 1 <= sidx <= len(gems):
-                    out.append((sidx, True, False))
+                    out.append((sidx, True, False, 0))
                     used.add(sidx)
         rest = [i for i in range(1, len(gems) + 1) if i not in used]
         has_active_left = any(not gems[i - 1].get("support") for i in rest)
         for i in rest:
             sup = bool(gems[i - 1].get("support"))
             # 꺼진 액티브가 남아 있으면 그 밑으로 (원래 순서), 아니면 어디에도 안 붙는 보조젬
-            out.append((i, sup and has_active_left, sup and not has_active_left))
+            out.append((i, sup and has_active_left, sup and not has_active_left, 0))
         return out
 
     def _later(self, key, fn) -> None:

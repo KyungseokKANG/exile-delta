@@ -16,6 +16,7 @@ SECTIONS = {
     "Skill Options": "스킬 옵션",
     "Map Modifiers and Player Debuffs": "지도 옵션 · 플레이어 약화",
     "For Effective DPS": "실질 DPS (적 상태)",
+    "Enemy Stats": "적 설정",
 }
 
 R = "최근 4초 이내"
@@ -559,6 +560,36 @@ LABELS = {
     "Enemy hit you with Cold Damage?": "적이 나를 냉기 피해로 명중시켰는가?",
     "Enemy hit you with Light. Damage?": "적이 나를 번개 피해로 명중시켰는가?",
     "# of Mania Stacks": "광증 중첩 수",
+    # 적 설정 (Enemy Stats)
+    "Enemy Level": "적 레벨",
+    "Is the enemy a Boss?": "적이 보스인가?",
+    "Delirious Effect": "환영 효과",
+    "Enemy Phys. Damage Reduction": "적 물리 피해 감소",
+    "Enemy Lightning Resistance": "적 번개 저항",
+    "Enemy Cold Resistance": "적 냉기 저항",
+    "Enemy Fire Resistance": "적 화염 저항",
+    "Enemy Chaos Resistance": "적 카오스 저항",
+    "Enemy Max Resistance is always 75%": "적 최대 저항 항상 75%",
+    "Enemy Block Chance": "적 막기 확률",
+    "Enemy Base Evasion": "적 기본 회피",
+    "Enemy Base Armour": "적 기본 방어도",
+    "Boss Skill Preset": "보스 스킬 프리셋",
+    "Enemy Damage Type": "적 피해 종류",
+    "Enemy attack / cast time in ms": "적 공격 / 시전 시간 (ms)",
+    "Enemy critical strike chance": "적 치명타 확률",
+    "Enemy critical strike multiplier": "적 치명타 피해 배율",
+    "Enemy Skill Physical Damage": "적 스킬 물리 피해",
+    "Enemy Skill Physical Overwhelm": "적 스킬 물리 압도",
+    "Enemy Skill Lightning Damage": "적 스킬 번개 피해",
+    "Enemy Skill Lightning Pen": "적 스킬 번개 관통",
+    "Enemy Skill Cold Damage": "적 스킬 냉기 피해",
+    "Enemy Skill Cold Pen": "적 스킬 냉기 관통",
+    "Enemy Skill Fire Damage": "적 스킬 화염 피해",
+    "Enemy Skill Fire Pen": "적 스킬 화염 관통",
+    "Enemy Skill Chaos Damage": "적 스킬 카오스 피해",
+    "Enemy Skill Damage Roll Range": "적 스킬 피해 굴림 범위",
+    "Enemy Damage Roll Range": "적 피해 굴림 범위",
+    "Enemy PvP Damage Multiplier": "적 PvP 피해 배율",
 }
 
 # 드롭다운 항목
@@ -585,6 +616,17 @@ OPTIONS = {
     "Chilling": "냉각", "Shocking": "감전", "Igniting": "점화", "Chill + Shock + Ignite": "냉각 + 감전 + 점화",
     "Hit": "명중", "Damage over Time": "지속 피해",
     "Elemental Overload": "원소 과부하", "Resolute Technique": "확고한 기술",
+    # 적 설정
+    "No": "아니오", "Standard Boss": "일반 보스", "Guardian/Pinnacle Boss": "수호자 · 최종 보스",
+    "Uber Pinnacle Boss": "우버 최종 보스",
+    "20% Delirious": "환영 20%", "40% Delirious": "환영 40%", "60% Delirious": "환영 60%",
+    "80% Delirious": "환영 80%", "100% Delirious": "환영 100%",
+    "Melee": "근접", "Projectile": "투사체", "Spell": "주문", "Projectile Spell": "투사체 주문",
+    "Damage Over Time": "지속 피해", "Untyped": "속성 없음",
+    "Atziri Flameblast": "아트지리 화염 폭발", "Cortex Ground Degen": "피질 바닥 지속 피해",
+    "Eater Beam": "포식자 광선", "Exarch Ball": "총주교 구체", "Maven Fireball": "메이븐 화염구",
+    "Maven Memory Game": "메이븐 기억 게임", "Shaper Ball": "쉐이퍼 구체", "Shaper Beam": "쉐이퍼 광선",
+    "Shaper Slam": "쉐이퍼 내려찍기", "Sirus Meteor": "시러스 유성",
 }
 
 _names: dict[str, str] | None = None

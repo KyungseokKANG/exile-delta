@@ -137,6 +137,15 @@ class PobEngine:
         self.g.es_set_skill_part(part)
         return self.summary()
 
+    def set_level(self, level: int) -> dict:
+        self.g.es_set_level(int(level))
+        return self.summary()
+
+    def set_skill_knob(self, group: int, active: int, key: str, value) -> dict:
+        """단계 수(stage) · 활성 지뢰 수(mine) · 토템 수(count). value=None 이면 PoB 기본값으로."""
+        self.g.es_set_skill_knob(int(group), int(active), key.encode("utf-8"), None if value is None else int(value))
+        return self.summary()
+
     # ---- 장비 ----
     def equipment(self) -> dict:
         return _to_py(self.g.es_equipment())

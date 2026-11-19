@@ -66,6 +66,19 @@ def ko(en: str) -> str:
     return en
 
 
+PARTS_KO = {
+    "Manual Stages": "단계 직접 지정",
+    "Maximum Stages": "최대 단계",
+    "Max Stages": "최대 단계",
+    "Stages": "단계",
+}
+
+
+def part_label(en: str) -> str:
+    """스킬 파트 이름 (PoB 사이드바 세 번째 칸). 모르는 건 영어 그대로."""
+    return PARTS_KO.get(en, en)
+
+
 def is_vaal(en: str) -> bool:
     return en.startswith("Vaal ")
 

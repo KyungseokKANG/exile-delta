@@ -393,9 +393,12 @@ function es_get_prefs()
 		local gems = { }
 		for _, gem in ipairs(g.gemList or { }) do
 			gems[gemName(gem)] = { enabled = gem.enabled ~= false, skillPart = gem.skillPart,
-			                       skillMinion = gem.skillMinion, skillMinionSkill = gem.skillMinionSkill }
+			                       skillMinion = gem.skillMinion, skillMinionSkill = gem.skillMinionSkill,
+			                       skillStageCount = gem.skillStageCount, skillMineCount = gem.skillMineCount,
+			                       count = gem.count }
 		end
 		p.groups[#p.groups + 1] = { full = full, names = names, slot = g.slot or "", enabled = g.enabled ~= false,
+		                            groupCount = g.groupCount,
 		                            includeInFullDPS = g.includeInFullDPS and true or false,
 		                            mainActiveSkill = g.mainActiveSkill, gems = gems, main = (gi == build.mainSocketGroup) }
 	end
@@ -435,6 +438,7 @@ function es_apply_prefs(p)
 			g.enabled = pg.enabled
 			g.includeInFullDPS = pg.includeInFullDPS
 			if pg.mainActiveSkill then g.mainActiveSkill = pg.mainActiveSkill end
+			if g.source and pg.groupCount then g.groupCount = pg.groupCount end
 			for _, gem in ipairs(g.gemList or { }) do
 				local pv = pg.gems[gemName(gem)]
 				if pv then
@@ -442,6 +446,9 @@ function es_apply_prefs(p)
 					gem.skillPart = pv.skillPart
 					gem.skillMinion = pv.skillMinion
 					gem.skillMinionSkill = pv.skillMinionSkill
+					if pv.skillStageCount then gem.skillStageCount = pv.skillStageCount end
+					if pv.skillMineCount then gem.skillMineCount = pv.skillMineCount end
+					if pv.count then gem.count = pv.count end
 				end
 			end
 			if pg.main then build.mainSocketGroup = gi end
@@ -577,6 +584,80 @@ local function degenSources(env)
 	return res
 end
 
+-- PoB 사이드바 'Stages:' · 'Active Mines:' 칸과 젬 'Count' (토템 스킬) — Build.lua 와 같은 조건 · 같은 기본값
+-- 젬 탭과 상단 주 스킬 줄이 같은 srcInstance 값을 읽고 쓰므로 한쪽에서 바꾸면 양쪽 다 바뀜
+local function skillKnobs(group, s)
+	local ae = s and s.activeEffect
+	local src = ae and ae.srcInstance
+	if not (ae and src) then return nil end
+	local ge = ae.grantedEffect
+	local flags = s.skillFlags or { }
+	local k = { }
+	local parts = ge.parts
+	local multiPart = parts and #parts > 1
+	local part = multiPart and parts[src.skillPart or 1] or nil
+	if (part and part.stages) or (flags.multiStage and not multiPart) then
+		local sd = s.skillData or { }
+		k.stage = src.skillStageCount or sd.stagesMax or (part and part.stagesMin) or sd.stagesMin or 1
+		k.stageMax = sd.stagesMax
+		k.stageSet = src.skillStageCount ~= nil
+	end
+	if flags.mine then
+		k.mineShown = true
+		k.mine = src.skillMineCount
+	end
+	-- 젬 Count (PoB 젬 줄의 Count 칸 / 아이템 스킬은 그룹 Count): Full DPS 에 이 스킬을 몇 개로 셀지
+	if not (ge.support or flags.disable) then
+		k.count = (group and group.source and group.groupCount) or src.count or 1
+		k.kind = flags.totem and "totem" or (flags.minion or ge.minionList) and "minion" or "skill"
+		if flags.totem then
+			k.totem = true
+			local env = build.calcsTab.mainEnv
+			local o = env and env.player and env.player.mainSkill == s and build.calcsTab.mainOutput or nil
+			k.totemLimit = o and o.ActiveTotemLimit or nil
+		end
+	end
+	if next(k) == nil then return nil end
+	return k
+end
+
+-- 캐릭터 레벨 (PoB 맨 위 Level 칸과 같음: 직접 넣으면 Manual 모드)
+function es_set_level(level)
+	level = math.min(math.max(math.floor(tonumber(level) or 1), 1), 100)
+	build.characterLevel = level
+	build.characterLevelAutoMode = false
+	if build.controls and build.controls.characterLevel then build.controls.characterLevel:SetText(level) end
+	if build.controls and build.controls.levelScalingButton then build.controls.levelScalingButton.label = "Manual" end
+	build.configTab:BuildModList()
+	build.modFlag = true
+	build.buildFlag = true
+	frame()
+	return true
+end
+
+function es_set_skill_knob(groupIndex, activeIndex, key, value)
+	local group = build.skillsTab.socketGroupList[groupIndex]
+	if group and not (activeIndex and activeIndex > 0) then activeIndex = group.mainActiveSkill or 1 end
+	local s = group and group.displaySkillList and group.displaySkillList[activeIndex]
+	local src = s and s.activeEffect and s.activeEffect.srcInstance
+	if not src then return false end
+	local v = tonumber(value)
+	if key == "stage" then
+		src.skillStageCount = v
+	elseif key == "mine" then
+		src.skillMineCount = v
+	elseif key == "count" then
+		v = v and math.max(1, math.floor(v)) or 1
+		if group.source then group.groupCount = v else src.count = v end
+	else
+		return false
+	end
+	build.modFlag = true
+	build.buildFlag = true
+	frame()
+	return true
+end
+
 function es_summary()
 	local out = { }
 	out.className = build.spec.curClassName
@@ -616,9 +697,11 @@ function es_summary()
 		-- 액티브마다 실제로 붙는 보조젬 (PoB canGrantedEffectSupportActiveSkill, 꺼진 보조젬도 포함해 판정)
 		-- [{active = gemList 번호, supports = {번호…}}] — 젬 탭에서 '액티브 밑에 그 보조젬들' 로 보여줌
 		local links = { }
+		local knobs = { }
 		for j, s in ipairs(group.displaySkillList or { }) do
 			local ge = s.activeEffect and s.activeEffect.grantedEffect
 			actives[j] = ge and ge.name or ("Skill " .. j)
+			knobs[j] = skillKnobs(group, s) or false
 			local ai = 0
 			for k, gem in ipairs(group.gemList or { }) do
 				if s.activeEffect and gem == s.activeEffect.srcInstance then ai = k break end
@@ -632,7 +715,7 @@ function es_summary()
 						if ok and yes then sup[#sup + 1] = k end
 					end
 				end
-				links[#links + 1] = { active = ai, supports = sup }
+				links[#links + 1] = { active = ai, supports = sup, skill = j }
 			end
 		end
 		out.groups[i] = {
@@ -642,6 +725,7 @@ function es_summary()
 			includeInFullDPS = group.includeInFullDPS == true,
 			mainActiveSkill = group.mainActiveSkill or 1,
 			actives = actives,
+			knobs = knobs,
 			links = links,
 			gems = gems,
 		}
@@ -655,6 +739,7 @@ function es_summary()
 		for j, p in ipairs(ms.activeEffect.grantedEffect.parts) do out.skillParts[j] = p.name or ("Part " .. j) end
 		out.skillPart = (ms.activeEffect.srcInstance and ms.activeEffect.srcInstance.skillPart) or 1
 	end
+	out.mainKnobs = ms and skillKnobs(mg, ms) or nil
 	-- 바알 면죄 · 바알 지배: '바알 쪽 = 승천한 파수꾼' 으로 보여주기 위한 정보 (아래쪽에 정의된 전역 함수)
 	if es_ascend_info then
 		local ok, a = pcall(es_ascend_info)
@@ -715,8 +800,8 @@ local configVarByName = { }
 for _, v in ipairs(configVarList) do
 	if v.var then configVarByName[v.var] = v end
 end
--- 편집 대상에서 제외하는 섹션: 적 기준은 PoB 기본값 그대로, 사용자 정의 모드는 텍스트라 제외
-local LOCKED_SECTIONS = { ["Enemy Stats"] = true, ["Custom Modifiers"] = true }
+-- 편집 대상에서 제외하는 섹션: 사용자 정의 모드는 텍스트라 제외 (적 설정은 PoB 처럼 고칠 수 있게)
+local LOCKED_SECTIONS = { ["Custom Modifiers"] = true }
 local configVarSection = { }
 do
 	local sec

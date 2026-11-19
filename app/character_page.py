@@ -9,6 +9,7 @@ from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QDoubleValidator, QIntValidator, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QLineEdit,
+    QSpinBox,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -382,6 +383,17 @@ class CharacterPage(QWidget):
             sk_row.addWidget(box, stretch)
             self._skill_fields[w] = box
 
+        # 캐릭터 레벨 (PoB 맨 위 Level 칸): 바꾸면 그 레벨 기준으로 다시 계산 (계정에서 다시 받으면 실제 레벨로)
+        self.level_spin = QSpinBox()
+        self.level_spin.setRange(1, 100)
+        self.level_spin.setKeyboardTracking(False)
+        self.level_spin.setMinimumWidth(70)
+        self.level_spin.setToolTip("캐릭터 레벨 (PoB 맨 위 Level 칸)\n바꾸면 그 레벨 기준으로 다시 계산해요\n"
+                                   "계정에서 다시 가져오면 실제 레벨로 돌아가요")
+        self._level_timer = QTimer(self, singleShot=True, interval=500)
+        self._level_timer.timeout.connect(self._commit_level)
+        self.level_spin.valueChanged.connect(lambda _v: self._level_timer.start())
+        field("레벨", self.level_spin, 0, "캐릭터 레벨 (PoB 맨 위 Level 칸)")
         field("계산할 스킬 그룹", self.main_combo, 3, "DPS 를 계산할 스킬 그룹 (PoB 사이드바 첫 번째 칸)")
         field("그룹 안의 스킬", self.active_combo, 2,
               "그룹 안에 스킬이 여럿일 때 (예: 바알 젬은 바알 쪽 / 일반 쪽)")
@@ -391,6 +403,14 @@ class CharacterPage(QWidget):
               "소환수가 이 스킬만 계속 쓴다고 보고 계산해요 (PoB 와 같음)")
         for w in (self.active_combo, self.part_combo, self.minion_combo, self.minion_skill_combo):
             self._skill_fields[w].hide()  # 계산 결과가 오면 _render_skills 가 필요한 칸만 보이게
+        # 단계 수 · 활성 지뢰 수 · 토템 수 (PoB 사이드바 Stages / Active Mines, 젬 Count) — 필요한 스킬일 때만
+        self.knob_box = QWidget()
+        self.knob_row = QHBoxLayout(self.knob_box)
+        self.knob_row.setContentsMargins(0, 0, 0, 0)
+        self.knob_row.setSpacing(10)
+        self._knob_spins: dict = {}
+        sk_row.addWidget(self.knob_box)
+        self.knob_box.hide()
         chk_box = QVBoxLayout()
         chk_box.addStretch(1)
         chk_box.addWidget(self.minion_chk)
@@ -754,6 +774,8 @@ class CharacterPage(QWidget):
                 self.store.set_orig(cid, new_xml)
                 c["orig_stats"] = (c["summary"] or {}).get("stats") or {}
         self.store.save()
+        sb = self.scroll.verticalScrollBar()
+        pos = sb.value()  # 값 하나 바꿨다고 스크롤이 튀지 않게 (다시 그리면서 내용이 잠깐 줄어듦)
         if self._cur() is c:
             self._render(c, c["summary"])
         tw = self._tree_win
@@ -762,6 +784,8 @@ class CharacterPage(QWidget):
         if self._cur() is c:
             self.equip.on_result(cid)
             self.gems.on_summary(cid)
+            sb.setValue(pos)
+            QTimer.singleShot(0, lambda: sb.setValue(pos))
         self.flash(flash or f"{c['name']} 계산 완료")
 
     # ---------------------------------------------------------------- 되돌리기
@@ -1301,7 +1325,7 @@ class CharacterPage(QWidget):
             f"계산 엔진: <b>Path of Building {html.escape(str(s.get('pobVersion', '?')))}</b>"
             f" &nbsp;·&nbsp; 기본값과 다른 항목 <b style='color:#e8b65a'>{n_changed}</b>개 (금색)"
             f"<br><span style='color:{DIM}'>PoB 처럼 이 빌드에 관련된 항목만 보입니다. "
-            f"적 기준(Enemy Stats)은 PoB 기본값 고정. 마우스를 올리면 PoB 원문 설명이 보입니다.</span>")
+            f"적 설정(보스 종류 · 적 저항 등)도 PoB 처럼 바꿀 수 있어요. 마우스를 올리면 PoB 원문 설명이 보입니다.</span>")
         q = self.cfg_search.text().strip().lower()
         only_changed = self.cfg_changed.isChecked()
         shown_any = False
@@ -1340,7 +1364,7 @@ class CharacterPage(QWidget):
         locked = [x for x in (cfg.get("locked") or []) if isinstance(x, dict)]
         if locked:
             self.cfg_others.setText(
-                f"<span style='color:{DIM}'>이 빌드에 들어 있는 적 기준 설정 (PoB 코드에서 가져온 값, 여기서는 변경 불가)</span><br>"
+                f"<span style='color:{DIM}'>이 빌드에 들어 있는 사용자 정의 설정 (PoB 코드에서 가져온 값, 여기서는 변경 불가)</span><br>"
                 + " &nbsp;·&nbsp; ".join(
                     f"{html.escape(x['label'])} <b>{html.escape(str(x['value']))}</b>" for x in locked))
         else:
@@ -1525,6 +1549,11 @@ class CharacterPage(QWidget):
                 cur = self.main_combo.count() - 1
         self.main_combo.setCurrentIndex(cur)
         self.main_combo.setEnabled(ready and self.main_combo.count() > 0)
+        if not self.level_spin.hasFocus() and s.get("level"):
+            self.level_spin.blockSignals(True)
+            self.level_spin.setValue(int(s.get("level")))
+            self.level_spin.blockSignals(False)
+        self.level_spin.setEnabled(ready and bool(s))
         mg = groups[main - 1] if isinstance(main, int) and 0 < main <= len(groups) else {}
         actives = mg.get("actives") or []
         self.active_combo.clear()
@@ -1548,10 +1577,13 @@ class CharacterPage(QWidget):
         self.active_combo.setEnabled(ready)
         parts = s.get("skillParts") or []
         self.part_combo.clear()
-        self.part_combo.addItems(parts)
+        for j, p in enumerate(parts):
+            self.part_combo.addItem(skillnames.part_label(p))
+            self.part_combo.setItemData(j, p, Qt.ItemDataRole.ToolTipRole)
         self.part_combo.setCurrentIndex(int(s.get("skillPart") or 1) - 1)
         self._skill_fields[self.part_combo].setVisible(len(parts) > 1)
         self.part_combo.setEnabled(ready)
+        self._render_knobs(s.get("mainKnobs"), ready)
         for cb, items, sel in ((self.minion_combo, s.get("minions") or [], s.get("minionSel")),
                                (self.minion_skill_combo, s.get("minionSkills") or [], s.get("minionSkillSel"))):
             cb.clear()
@@ -1569,6 +1601,66 @@ class CharacterPage(QWidget):
         if c and isinstance(i, int) and i != ((c.get("summary") or {}).get("mainSocketGroup")):
             self.client.call("set_main_group", {"index": i}, lambda r: self._apply_result(c["id"], r, "주 스킬 변경됨"),
                              self._on_call_err)
+
+    def _render_knobs(self, knobs: dict | None, ready: bool) -> None:
+        """상단 주 스킬 줄의 단계 수 · 활성 지뢰 수 · 토템 수. 같은 칸이면 값만 바꿔서 입력 중인 칸이 안 사라지게."""
+        import skill_knobs
+
+        specs = skill_knobs.spins(knobs)
+        keys = [(k, skill_knobs.label(k, knobs)) for k, *_ in specs]
+        if keys != getattr(self, "_knob_keys", None):
+            self._knob_keys = keys
+            while self.knob_row.count():
+                it = self.knob_row.takeAt(0)
+                if it.widget():
+                    it.widget().deleteLater()
+            self._knob_spins = {}
+            for key, val, lo, hi in specs:
+                box = QWidget()
+                bv = QVBoxLayout(box)
+                bv.setContentsMargins(0, 0, 0, 0)
+                bv.setSpacing(2)
+                cap = QLabel(skill_knobs.label(key, knobs))
+                cap.setStyleSheet("color: #8a8170; font-size: 8.5pt;")
+                bv.addWidget(cap)
+                sp = skill_knobs.make_spin(key, val, lo, hi, lambda k, v: self.set_skill_knob(0, 0, k, v), knobs)
+                sp.setMinimumWidth(70)
+                bv.addWidget(sp)
+                self.knob_row.addWidget(box)
+                self._knob_spins[key] = sp
+        for key, val, lo, hi in specs:
+            sp = self._knob_spins[key]
+            sp.blockSignals(True)
+            sp.setRange(lo, hi)
+            sp.setValue(max(lo, min(hi, val)))
+            sp.setToolTip(skill_knobs.tip(key, knobs))
+            sp.blockSignals(False)
+            sp.setEnabled(ready)
+        self.knob_box.setVisible(bool(specs))
+
+    def _commit_level(self) -> None:
+        c = self._cur()
+        if not c:
+            return
+        v = self.level_spin.value()
+        if v != int(((c.get("summary") or {}).get("level")) or 0):
+            self._call("set_level", {"level": v}, f"레벨 {v} 로 변경됨")
+
+    def set_skill_knob(self, group: int, active: int, key: str, value: int) -> None:
+        """group=0 이면 주 스킬 그룹, active=0 이면 그 그룹의 주 액티브. 상단 줄 · 젬 탭 둘 다 여기로."""
+        import skill_knobs
+
+        c = self._cur()
+        if not c:
+            return
+        s = c.get("summary") or {}
+        if not group:
+            group = int(s.get("mainSocketGroup") or 0)
+        if not group:
+            return
+        v = None if (key == "mine" and not value) else int(value)
+        self._call("set_skill_knob", {"group": group, "active": active, "key": key, "value": v},
+                   f"{skill_knobs.LABEL[key]} 변경됨")
 
     def _call(self, cmd: str, args: dict, msg: str) -> None:
         c = self._cur()

@@ -60,7 +60,11 @@ def change_cells(a: dict, b: dict) -> list[str]:
         return []
     cells = []
     dk = "FullDPS" if a.get("FullDPS") and b.get("FullDPS") else "CombinedDPS"
-    for key, nm in ((dk, "DPS"), ("TotalEHP", "EHP")):
+    keys = [(dk, "DPS")]
+    fp = pct(a.get(dk), b.get(dk))
+    if dk == "FullDPS" and (fp is None or abs(fp) < 0.05):
+        keys.append(("CombinedDPS", "주 스킬 DPS"))  # Full DPS 에 안 들어가는 주 스킬(단계 수 등)만 바뀐 경우
+    for key, nm in (*keys, ("TotalEHP", "EHP")):
         p = pct(a.get(key), b.get(key))
         if p is not None and abs(p) >= 0.05:
             cells.append(f"<span style='color:{DIM}'>{nm}</span> <b style='color:{POS if p > 0 else NEG}'>{p:+.1f}%</b>")

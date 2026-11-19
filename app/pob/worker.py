@@ -67,13 +67,17 @@ def run(port: int, log_path: Path) -> int:
                     "summary": engine.set_group(int(args["index"]), args.get("enabled"), args.get("full_dps")),
                     "xml": engine.save_xml(),
                 }
-            elif cmd in ("set_config", "reset_config", "set_flask", "set_active_skill", "set_skill_part"):
+            elif cmd in ("set_config", "reset_config", "set_flask", "set_active_skill", "set_skill_part", "set_skill_knob",
+                         "set_level"):
                 fn = {
                     "set_config": lambda: engine.set_config(args["var"], args.get("value")),
                     "reset_config": engine.reset_config,
                     "set_flask": lambda: engine.set_flask(args["slot"], args["active"]),
                     "set_active_skill": lambda: engine.set_active_skill(int(args["group"]), int(args["active"])),
                     "set_skill_part": lambda: engine.set_skill_part(int(args["part"])),
+                    "set_level": lambda: engine.set_level(int(args["level"])),
+                    "set_skill_knob": lambda: engine.set_skill_knob(args["group"], args["active"], args["key"],
+                                                                    args.get("value")),
                 }[cmd]
                 result = {"summary": fn(), "xml": engine.save_xml()}
             elif cmd == "equipment":
