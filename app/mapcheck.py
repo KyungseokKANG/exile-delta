@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from data import resource_path
 
 SEP = "--------"
-MAP_CLASSES = {"지도", "Maps"}
+MAP_CLASSES = {"지도", "Maps", "기타 지도 아이템", "Misc Map Items"}  # 기타: 메이븐 초대장 · 총주교/엑사크/먹보 초대장 등
 _RANGE = re.compile(r"\(\s*-?\d+(?:\.\d+)?\s*-\s*-?\d+(?:\.\d+)?\s*\)")
 _NUM = re.compile(r"[+-]?\d+(?:\.\d+)?")
 _TAG = re.compile(r"\s*\((?:implicit|crafted|fractured|enchant|augmented|unmet|scourge|crucible)\)\s*$", re.I)
@@ -90,10 +90,16 @@ def parse_map(text: str) -> MapInfo | None:
     base = names[-1] if names else ""
     tier = None
     unid = corrupted = False
-    mods: list[str] = []
+    sections: list[list[str]] = [[]]
     for ln in lines[i:]:
-        if not ln or ln == SEP or ln.startswith("{"):
+        if ln == SEP:
+            sections.append([])
+            continue
+        mods = sections[-1]
+        if not ln or ln.startswith("{"):
             continue  # 고급 설명의 { 접두어 속성 부여 … } 머리줄
+        if ln.startswith("(") and ln.endswith(")"):
+            continue  # 설명 괄호줄 (억제된 명중과 … 방지합니다.)
         if "지도 장치" in ln or "Map Device" in ln:
             continue  # 아이템 설명문
         ln = _UNSCALABLE.sub("", ln)
@@ -113,6 +119,14 @@ def parse_map(text: str) -> MapInfo | None:
         if sep and len(k) <= 20:
             continue  # 속성 줄 (아이템 수량: +80% 등)
         mods.append(_TAG.sub("", ln))
+    # 옵션 칸 뒤에 오는, 목록에 하나도 안 맞는 칸은 배경 글(초대장 문구 등) → 뺌
+    mods = []
+    seen_mod = False
+    for sec in sections:
+        hit = any(entry_for(x) is not None for x in sec)
+        if hit or not seen_mod:
+            mods += sec
+        seen_mod = seen_mod or hit
     if tier is None:  # 새 형식: 베이스 이름에 '지도 (10등급)' / 'Map (Tier 10)'
         mt = re.search(r"\((\d+)\s*등급\)|\(Tier\s*(\d+)\)", base, re.I)
         if mt:
