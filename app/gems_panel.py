@@ -235,6 +235,30 @@ class GemsCard:
             if isinstance(knobs, dict):  # (Lua 표 → 번호 키 dict 로 올 때)
                 knobs = [knobs[k] for k in sorted(knobs, key=lambda x: int(x))]
             for ii, under, orphan, sk in self._order(g, gems):
+                if isinstance(ii, dict):
+                    # 아이템이 주는 보조 (젬 목록엔 없음 · 아이템 옵션이라 여기서 못 바꿈)
+                    nm = QLabel("&nbsp;&nbsp;&nbsp;└ " + gem_ko(ii["name"]) +
+                                f" <span style='color:{DIM}; font-size:9pt'>(아이템)</span>")
+                    nm.setTextFormat(Qt.TextFormat.RichText)
+                    nm.setStyleSheet("color: #9fb5ff;")
+                    nm.setToolTip("장착한 아이템 옵션으로 붙는 보조젬이에요 (예: '장착된 젬이 레벨 20 화상 피해 보조를 받음'). "
+                                  "레벨은 아이템 옵션이라 여기서 바꿀 수 없어요.")
+                    self.grid.addWidget(nm, row, 1)
+                    # 다른 보조젬 줄의 레벨·퀄리티 칸과 같은 자리에 (레벨 칸 폭 84 + 퀄리티 칸 폭 76)
+                    lvl = QLabel(f"&nbsp;&nbsp;Lv {int(ii.get('level') or 0)}")
+                    lvl.setTextFormat(Qt.TextFormat.RichText)
+                    lvl.setStyleSheet(f"color: {DIM};")
+                    lvl.setFixedWidth(84)
+                    gap = QWidget()
+                    gap.setFixedWidth(76)
+                    ib = QHBoxLayout()
+                    ib.setSpacing(6)
+                    ib.addWidget(lvl)
+                    ib.addWidget(gap)
+                    self.grid.addLayout(ib, row, 2)
+                    self.grid.addWidget(QLabel(f"<span style='color:{DIM}'>아이템이 주는 보조젬</span>"), row, 3)
+                    row += 1
+                    continue
                 gem = gems[ii - 1]
                 from_item = bool(gem.get("fromItem"))
                 chk = QCheckBox()
@@ -337,6 +361,12 @@ class GemsCard:
                 if 1 <= sidx <= len(gems):
                     out.append((sidx, True, False, 0))
                     used.add(sidx)
+            isups = ln.get("itemSupports") or []
+            if isinstance(isups, dict):
+                isups = list(isups.values())
+            for it in isups:  # 아이템이 주는 보조 — 젬 번호 대신 {name, level}
+                if isinstance(it, dict) and it.get("name"):
+                    out.append((it, True, False, 0))
         rest = [i for i in range(1, len(gems) + 1) if i not in used]
         has_active_left = any(not gems[i - 1].get("support") for i in rest)
         for i in rest:

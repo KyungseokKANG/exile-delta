@@ -715,7 +715,16 @@ function es_summary()
 						if ok and yes then sup[#sup + 1] = k end
 					end
 				end
-				links[#links + 1] = { active = ai, supports = sup, skill = j }
+				-- 아이템이 주는 보조 (엘더 투구의 '장착된 젬이 레벨 N 화상 피해 보조를 받음' 등): 젬 목록에 없고
+				-- 계산 때 붙은 효과 목록(effectList)에만 있음 → srcInstance 가 없는 보조 효과
+				local itemSup = { }
+				for _, eff in ipairs(s.effectList or { }) do
+					local ege = eff.grantedEffect
+					if eff ~= s.activeEffect and ege and ege.support and not eff.srcInstance then
+						itemSup[#itemSup + 1] = { name = ege.name, level = eff.level }
+					end
+				end
+				links[#links + 1] = { active = ai, supports = sup, skill = j, itemSupports = itemSup }
 			end
 		end
 		out.groups[i] = {
