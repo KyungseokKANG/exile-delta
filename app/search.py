@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from data import tier_range_text
-from dialogs import DragHeader, FramelessDialog
+from dialogs import DragHeader, FramelessDialog, SearchEdit
 
 
 def gen_badge(entry: dict) -> QLabel:
@@ -102,10 +102,10 @@ class SearchDialog(FramelessDialog):
         body.setSpacing(10)
         v.addLayout(body, 1)
 
-        self.search = QLineEdit()
+        self.search = SearchEdit()
         self.search.setPlaceholderText("옵션 이름 검색  —  예: 생명력, 화염 저항, 공격 속도, life")
         self.search.setClearButtonEnabled(True)
-        self.search.textChanged.connect(self._filter)
+        self.search.searchChanged.connect(lambda _t: self._filter())
         self.search.installEventFilter(self)
         body.addWidget(self.search)
 
@@ -197,7 +197,7 @@ class SearchDialog(FramelessDialog):
 
     # ---- 동작 ----
     def _filter(self) -> None:
-        words = self.search.text().lower().split()
+        words = self.search.live_text().lower().split()
         mode = self.chip_group.checkedId()
         shown = 0
         for i, e in enumerate(self.entries):
@@ -307,6 +307,5 @@ class SearchDialog(FramelessDialog):
                 self._select_next(self.list.currentRow() + step, step)
                 return True
             if k in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                self._accept_current()
-                return True
+                return True  # 습관적으로 Enter 쳐도 창이 닫히거나 옵션이 추가되지 않게 (추가는 버튼 · 더블클릭)
         return super().eventFilter(obj, ev)

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from dialogs import DragHeader, FramelessDialog
+from dialogs import DragHeader, FramelessDialog, SearchEdit
 from implicit_mods import SUB_NAME, Group, tier_lines, tier_pairs
 from itemmodel import PRESENCE_RE
 
@@ -62,10 +62,10 @@ class ImplicitSearchDialog(FramelessDialog):
         body.setSpacing(10)
         v.addLayout(body, 1)
 
-        self.search = QLineEdit()
+        self.search = SearchEdit()
         self.search.setPlaceholderText("검색 — 예: 공격 속도, 화염, 생명력, attack speed")
         self.search.setClearButtonEnabled(True)
-        self.search.textChanged.connect(self._filter)
+        self.search.searchChanged.connect(lambda _t: self._filter())
         body.addWidget(self.search)
 
         chips = QHBoxLayout()
@@ -139,7 +139,7 @@ class ImplicitSearchDialog(FramelessDialog):
         return CHIPS[max(0, self.chip_group.checkedId())][0]
 
     def _filter(self) -> None:
-        q = self.search.text().strip().lower()
+        q = self.search.live_text().strip().lower()
         sub = self._cur_sub()
         n = 0
         first = -1

@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 import ko2en
+from dialogs import SearchEdit
 from overlay import Overlay
 
 DIM = "#968b7a"
@@ -85,9 +86,9 @@ class ItemCreator(QWidget):
         # 유니크
         tu = QWidget()
         uv = QVBoxLayout(tu)
-        self.u_search = QLineEdit()
+        self.u_search = SearchEdit()
         self.u_search.setPlaceholderText("유니크 검색 (한글/영문)")
-        self.u_search.textChanged.connect(self._fill_uniques)
+        self.u_search.searchChanged.connect(lambda _t: self._fill_uniques())
         self.u_list = QListWidget()
         self.u_list.itemClicked.connect(lambda it: self._new({"from": "unique", "name": it.data(Qt.ItemDataRole.UserRole)}))
         uv.addWidget(self.u_search)
@@ -109,9 +110,9 @@ class ItemCreator(QWidget):
         self.b_type = QComboBox()
         self.b_type.currentIndexChanged.connect(self._fill_bases)
         bv.addWidget(self.b_type)
-        self.b_search = QLineEdit()
+        self.b_search = SearchEdit()
         self.b_search.setPlaceholderText("베이스 검색")
-        self.b_search.textChanged.connect(self._fill_bases)
+        self.b_search.searchChanged.connect(lambda _t: self._fill_bases())
         bv.addWidget(self.b_search)
         self.b_list = QListWidget()
         self.b_list.itemDoubleClicked.connect(lambda _it: self._new_base())
@@ -289,7 +290,7 @@ class ItemCreator(QWidget):
         self._fill_bases()
 
     def _fill_uniques(self) -> None:
-        q = self.u_search.text().strip().lower()
+        q = self.u_search.live_text().strip().lower()
         self.u_list.clear()
         for x in (self.catalog or {}).get("uniques") or []:
             title = x["name"].split(", ")[0]  # PoB 유니크 DB 이름은 "이름, 베이스"
@@ -304,7 +305,7 @@ class ItemCreator(QWidget):
     def _fill_bases(self) -> None:
         self.b_list.clear()
         t = self.b_type.currentData()
-        q = self.b_search.text().strip().lower()
+        q = self.b_search.live_text().strip().lower()
         for bt in (self.catalog or {}).get("baseTypes") or []:
             if bt["type"] != t:
                 continue

@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from itemmodel import ItemModel, Mod, badge, cat_scalar, compose_en, get_quality, scale_numbers, set_quality
+from itemmodel import ItemModel, Mod, badge, cat_scalar, compose_en, get_quality, is_anoint, scale_numbers, set_quality
 from overlay import COL, DIM, SPIN, Overlay
 
 NUM_RE = re.compile(r"\d+(?:\.\d+)?")  # 부호(+/-)는 글자로 남기고 숫자만 입력칸
@@ -42,6 +42,25 @@ FLAG_KO = {"Corrupted": "타락", "Searing Exarch Item": "작열의 총주교", 
            "전쟁군주 아이템": "전쟁군주", "결합된 아이템": "결합된", "분열된 아이템": "분열된"}
 FLAG_COLOR = {"타락": "#e0644c", "작열의 총주교": "#e8a25a", "세계 포식자": "#9fb5ff"}
 SUB_COLOR = {"exarch": "#e8a25a", "eater": "#9fb5ff", "eldritch": "#c8a96a", "corrupted": "#e0644c"}
+ANOINT_COLOR = "#7fc7d7"
+
+
+def _pob_src():
+    from pob import installer
+
+    inst = installer.installed()
+    return inst[1] if inst else None
+
+
+def _anoint_info(mod: Mod):
+    """성유 줄 → anoint.Anoint (효과 · 필요 성유). 모르면 None."""
+    import anoint
+
+    src = _pob_src()
+    name = anoint.name_of(mod.text) or (anoint.name_of(mod.en) if mod.en else None)
+    if src is None or not name:
+        return None
+    return anoint.find(src, name)
 
 
 def _send_copy_to(hwnd: int) -> bool:
@@ -304,7 +323,10 @@ class ModRow(QFrame):
         if badge(mod):
             b = QLabel(badge(mod))
             b.setObjectName("KindBadge")
-            if mod.sub in SUB_COLOR:
+            if is_anoint(mod):
+                b.setStyleSheet(f"color: {ANOINT_COLOR}; border-color: {ANOINT_COLOR};")
+                b.setToolTip("성유로 배정한 패시브 (목걸이 인챈트)")
+            elif mod.sub in SUB_COLOR:
                 b.setStyleSheet(f"color: {SUB_COLOR[mod.sub]}; border-color: {SUB_COLOR[mod.sub]};")
             h.addWidget(b, 0, Qt.AlignmentFlag.AlignVCenter)
         body = QVBoxLayout()
@@ -313,6 +335,18 @@ class ModRow(QFrame):
         self.lines = [ModLine(m, on_change, scale_fn) for m in mods]
         for ln in self.lines:
             body.addWidget(ln)
+        if is_anoint(mod):
+            # 성유 줄 밑에: 패시브 효과 · 필요 성유 (PoB 트리 데이터)
+            info = _anoint_info(mod)
+            if info is not None:
+                from anoint_search import oils_html
+
+                sub_l = QLabel(f"<span style='color:{DIM}'>{html.escape(' / '.join(info.stats_ko))}</span>"
+                               f"<br><span style='color:{DIM}'>필요 성유</span> {oils_html(info)}")
+                sub_l.setTextFormat(Qt.TextFormat.RichText)
+                sub_l.setWordWrap(True)
+                sub_l.setStyleSheet("font-size: 10pt;")
+                body.addWidget(sub_l)
         h.addLayout(body, 1)
         from affix import badge as affix_badge
 
@@ -574,8 +608,15 @@ class ItemEditor(QWidget):
         self.imp_btn.setObjectName("OverlayEdit")
         self.imp_btn.setToolTip("작열의 총주교 / 세계 포식자 / 바알(타락) implicit 을 등급별로 검색해서 추가 (PoB 데이터)")
         self.imp_btn.clicked.connect(self._add_implicit)
+        # 목걸이만: 성유로 배정할 패시브 고르기
+        self.oil_btn = QPushButton("+ 성유 옵션")
+        self.oil_btn.setObjectName("OverlayEdit")
+        self.oil_btn.setToolTip("목걸이에 성유로 배정할 패시브를 이름 · 효과 · 성유로 검색해서 바르기 (PoB 트리 데이터)")
+        self.oil_btn.clicked.connect(self._add_anoint)
+        self.oil_btn.hide()
         add.addWidget(self.add_btn, 1)
         add.addWidget(self.imp_btn, 1)
+        add.addWidget(self.oil_btn, 1)
         v.addLayout(add)
         free = QHBoxLayout()
         free.setSpacing(6)
@@ -703,6 +744,7 @@ class ItemEditor(QWidget):
         self.res_title.setText(f"<span style='color:#c8a96a; font-weight:bold'>장착 시 변화</span>"
                                f" <span style='color:{DIM}'>· {html.escape(name)} · 현재 장착 장비 대비</span>")
         self.add_btn.setEnabled(bool(slot))
+        self.oil_btn.setVisible(slot == "Amulet")
         self.orig_label.setText("")
         self.nodef = set()
         self._sync_def(None)
@@ -890,6 +932,33 @@ class ItemEditor(QWidget):
             return
         for shown, en in dlg.selected_pairs:
             self._add_mod(shown, f"implicit:{dlg.selected_sub}", en=en)
+
+    def _add_anoint(self) -> None:
+        """성유 옵션 창 → 고른 패시브로 목걸이의 성유 줄을 바꿈 (있던 성유 줄은 빠짐) → 다시 계산."""
+        if self.model is None:
+            return
+        import anoint
+        from anoint_search import AnointSearchDialog
+
+        src = _pob_src()
+        items = anoint.load(src) if src else []
+        if not items:
+            self.result.setText(f"<span style='color:{COL['X']}'>PoB 엔진이 설치되어 있어야 성유 목록을 불러올 수 있습니다.</span>")
+            return
+        olds = [m for m in self.model.mods if is_anoint(m)]
+        cur = None
+        if olds:
+            info = _anoint_info(olds[0])
+            cur = info.ko if info else anoint.name_of(olds[0].text)
+        dlg = AnointSearchDialog(items, cur, self)
+        dlg.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        if not dlg.exec() or dlg.selected is None:
+            return
+        a = dlg.selected
+        for m in olds:  # 목걸이 성유는 하나 → 있던 줄을 바꿈
+            self.model.mods.remove(m)
+        text = a.line_ko if self.model.lang == "ko" else a.line_en
+        self._add_mod(text, "enchant", en=a.line_en)
 
     def _forward_copy(self) -> None:
         """이 창에 포커스가 있을 때(값을 고치던 중) 게임 아이템 위에서 Ctrl+C → 창은 그대로 두고 '불러오는 중'

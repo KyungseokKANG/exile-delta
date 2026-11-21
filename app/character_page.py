@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 
 from asyncjob import run_async
 from characters import CharacterStore
-from dialogs import confirm, info
+from dialogs import SearchEdit, confirm, info
 from import_dialog import ImportDialog
 from pob import config_ko, importers, installer
 from storage import load_settings, save_settings
@@ -532,13 +532,13 @@ class CharacterPage(QWidget):
         gv.addWidget(self.cfg_info)
         fr = QHBoxLayout()
         fr.setSpacing(8)
-        self.cfg_search = QLineEdit()
+        self.cfg_search = SearchEdit()
         self.cfg_search.setPlaceholderText("설정 검색 (예: 감전, 충전, shock)")
         self.cfg_search.setClearButtonEnabled(True)
         self.cfg_search.setMaximumWidth(360)
         self._cfg_timer = QTimer(self, singleShot=True, interval=200,
                                  timeout=lambda: self._render_config((self._cur() or {}).get("summary") or {}))
-        self.cfg_search.textChanged.connect(lambda _t: self._cfg_timer.start())
+        self.cfg_search.searchChanged.connect(lambda _t: self._cfg_timer.start())
         fr.addWidget(self.cfg_search)
         self.cfg_changed = QCheckBox("기본값과 다른 항목만")
         self.cfg_changed.toggled.connect(lambda _on: self._cfg_timer.start())
@@ -1326,7 +1326,7 @@ class CharacterPage(QWidget):
             f" &nbsp;·&nbsp; 기본값과 다른 항목 <b style='color:#e8b65a'>{n_changed}</b>개 (금색)"
             f"<br><span style='color:{DIM}'>PoB 처럼 이 빌드에 관련된 항목만 보입니다. "
             f"적 설정(보스 종류 · 적 저항 등)도 PoB 처럼 바꿀 수 있어요. 마우스를 올리면 PoB 원문 설명이 보입니다.</span>")
-        q = self.cfg_search.text().strip().lower()
+        q = self.cfg_search.live_text().strip().lower()
         only_changed = self.cfg_changed.isChecked()
         shown_any = False
         for sec in sections:

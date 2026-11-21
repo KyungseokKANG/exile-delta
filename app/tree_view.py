@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 
 import ko2en
 from character_page import DELTA_STATS, DIM, NEG, POS, fmt_big
-from dialogs import confirm
+from dialogs import SearchEdit, confirm
 from storage import load_settings, save_settings
 
 TYPE_KO = {
@@ -290,9 +290,9 @@ class TreeWindow(QWidget):
         sv.addWidget(self.h_sub)
         sv.addWidget(self.h_pts)
 
-        self.search = QLineEdit()
+        self.search = SearchEdit(swallow_enter=False)  # Enter = 다음 찾은 노드로
         self.search.setPlaceholderText("노드 검색 (이름·효과, 한글/영문)")
-        self.search.textChanged.connect(self._on_search)
+        self.search.searchChanged.connect(self._on_search)
         self.search.returnPressed.connect(self._next_match)
         self.s_info = QLabel()
         self.s_info.setObjectName("SectionLabel")

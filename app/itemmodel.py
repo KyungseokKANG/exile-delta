@@ -36,7 +36,14 @@ EATER_FLAGS = ("Eater of Worlds Item", "세계 포식자 아이템")
 CORRUPT_FLAGS = ("Corrupted", "타락")
 
 
+def is_anoint(m: "Mod") -> bool:
+    """목걸이 성유 줄 ('할당 X' / 'Allocates X' 인챈트)."""
+    return m.kind == "enchant" and re.match(r"\s*(Allocates|할당)\s", m.text or "") is not None
+
+
 def badge(m: "Mod") -> str:
+    if is_anoint(m):
+        return "성유"
     if m.kind == "implicit" and m.sub:
         return SUB_KO.get(m.sub, "고정")
     return KIND_KO.get(m.kind, "")

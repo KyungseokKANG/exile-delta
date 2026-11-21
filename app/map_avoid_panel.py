@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
 
+from dialogs import SearchEdit
+
 import mapcheck
 from storage import load_settings, save_settings
 
@@ -25,12 +27,12 @@ class MapAvoidCard:
 
         fr = QHBoxLayout()
         fr.setSpacing(8)
-        self.search = QLineEdit()
+        self.search = SearchEdit()
         self.search.setPlaceholderText("옵션 검색 (예: 회복, 반사, 저항)")
         self.search.setClearButtonEnabled(True)
         self.search.setMinimumWidth(280)
         self.search.setMaximumWidth(340)
-        self.search.textChanged.connect(lambda _t: self._layout())
+        self.search.searchChanged.connect(lambda _t: self._layout())
         fr.addWidget(self.search)
         self.which = QComboBox()
         for label, key in (("전체", ""), ("일반 지도에 나오는 것", "map"), ("17티어에만 나오는 것", "t17only"),
@@ -82,7 +84,7 @@ class MapAvoidCard:
             it = self.grid.takeAt(0)
             if it.widget():
                 it.widget().hide()
-        q = self.search.text().strip().lower()
+        q = self.search.live_text().strip().lower()
         which = self.which.currentData()
         shown = []
         for e, cb in self.boxes:
