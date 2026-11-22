@@ -461,8 +461,9 @@ class CharacterPage(QWidget):
                 "스킬 그룹(주 스킬·사용·Full DPS)과 젬 레벨·퀄리티",
                 "PoB Configuration (적 상태, 버프 등)",
                 "피하고 싶은 지도 옵션 고르기 → 지도에 Ctrl+C 하면 경고",
-                "부위별 DPS 최적 옵션 찾기 (실험 기능)")
-        for i, name in enumerate(("장비 · 주얼", "스킬 · 젬", "계산 설정", "비선호 지도", "옵션 최적화 (Beta)")):
+                "부위별 DPS 최적 옵션 찾기 (실험 기능)",
+                "게임 위에 항상 떠 있는 메모 (에센스 · 바알 · 준 정리용)")
+        for i, name in enumerate(("장비 · 주얼", "스킬 · 젬", "계산 설정", "비선호 지도", "옵션 최적화 (Beta)", "메모")):
             b = QPushButton(name)
             b.setObjectName("SubTab")
             b.setCheckable(True)
@@ -489,13 +490,14 @@ class CharacterPage(QWidget):
         v = QVBoxLayout(host)
         v.setContentsMargins(0, 0, 6, 0)
         v.setSpacing(12)
-        self.sub_pages = [QWidget(), QWidget(), QWidget(), QWidget(), QWidget()]
+        self.sub_pages = [QWidget(), QWidget(), QWidget(), QWidget(), QWidget(), QWidget()]
         page_eq = QVBoxLayout(self.sub_pages[0])
         page_gem = QVBoxLayout(self.sub_pages[1])
         page_cfg = QVBoxLayout(self.sub_pages[2])
         page_map = QVBoxLayout(self.sub_pages[3])
         page_beta = QVBoxLayout(self.sub_pages[4])
-        for pl in (page_eq, page_gem, page_cfg, page_map, page_beta):
+        page_memo = QVBoxLayout(self.sub_pages[5])
+        for pl in (page_eq, page_gem, page_cfg, page_map, page_beta, page_memo):
             pl.setContentsMargins(0, 0, 0, 0)
             pl.setSpacing(12)
 
@@ -522,6 +524,12 @@ class CharacterPage(QWidget):
         map_card, mv = card("비선호 지도  ·  지도에 Ctrl+C 하면 경고")
         self.map_avoid = MapAvoidCard(self, mv)
         page_map.addWidget(map_card)
+
+        from memo_panel import MemoCard
+
+        memo_card, mmv = card("메모  ·  게임 위에 항상 떠 있는 메모")
+        self.memo = MemoCard(self, mmv)
+        page_memo.addWidget(memo_card)
 
         # PoB Configuration
         cfg_card, gv = card("계산 설정  ·  PoB Configuration 탭과 같은 값")
@@ -569,7 +577,7 @@ class CharacterPage(QWidget):
         return outer
 
     def _set_sub(self, i: int, save: bool = True) -> None:
-        i = 0 if i not in (0, 1, 2, 3, 4) else i
+        i = 0 if i not in range(len(self.sub_pages)) else i
         for k, (b, w) in enumerate(zip(self.sub_btns, self.sub_pages)):
             b.setChecked(k == i)
             w.setVisible(k == i)  # 숨긴 쪽은 높이를 차지하지 않음

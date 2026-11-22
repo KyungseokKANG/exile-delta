@@ -401,6 +401,9 @@ def main() -> int:
                 self.editor_win.close()
             if getattr(self, "map_warn", None) is not None:
                 self.map_warn.close()
+            memo = getattr(getattr(self, "char_page", None), "memo", None)
+            if memo is not None:
+                memo._quit()  # 항상 위 메모 창도 같이 닫음 (띄움 상태는 저장된 그대로 → 다음에 켜면 다시 뜸)
             self.client.stop()
             super().closeEvent(e)
 
