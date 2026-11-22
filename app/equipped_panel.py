@@ -37,6 +37,28 @@ def _ko(line: str) -> str:
         return line
 
 
+def _name_html(name: str) -> str:
+    """PoB 아이템 이름 'Hypnotic Peak, Eternal Burgonet' → 한글 베이스 이름을 크게, 레어 이름은 작게.
+    (레어 이름 단어는 번역 자료가 없어서 영문 그대로)"""
+    gold = "color:#ead197; font-weight:bold"
+    try:
+        import ko2en
+
+        parts = [p.strip() for p in name.split(",")]
+        base_ko = ko2en.name_ko(parts[-1]) if parts else ""
+        if len(parts) == 1:  # 유니크 · 일반 · 마법
+            return f"<span style='{gold}'>{html.escape(base_ko or name)}</span>"
+        if base_ko:
+            title_ko = ko2en.name_ko(parts[0])  # 유니크면 이름도 한글로
+            if title_ko:
+                return f"<span style='{gold}'>{html.escape(title_ko)}</span> <span style='{gold}'>{html.escape(base_ko)}</span>"
+            return (f"<span style='{gold}'>{html.escape(base_ko)}</span>"
+                    f" <span style='color:{DIM}; font-size:10pt'>{html.escape(', '.join(parts[:-1]))}</span>")
+    except Exception:  # noqa: BLE001
+        pass
+    return f"<span style='{gold}'>{html.escape(name)}</span>"
+
+
 def _pct(d: dict, base: dict, key: str) -> float | None:
     a = base.get(key)
     v = d.get(key)
@@ -247,7 +269,7 @@ class EquippedPanel(QWidget):
         base = r.get("base") or {}
         self._dk = "FullDPS" if base.get("FullDPS") else "CombinedDPS"
         q = r.get("quality")
-        self.name.setText(f"<span style='color:#ead197; font-weight:bold'>{html.escape(r.get('name') or '')}</span>"
+        self.name.setText(_name_html(r.get("name") or "")
                           + (f" <span style='color:{DIM}; font-size:10pt'>퀄리티 {q}%</span>" if q else ""))
         self._build_rows()
         self._render(None)

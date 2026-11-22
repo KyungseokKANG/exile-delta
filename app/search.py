@@ -24,6 +24,10 @@ from data import tier_range_text
 from dialogs import DragHeader, FramelessDialog, SearchEdit
 
 
+SRC_BADGE = {"essence": "에센스", "veiled": "베일", "delve": "화석"}
+SRC_COLOR = {"essence": "#e9a6ff", "veiled": "#9fe0c0", "delve": "#e0b27a"}
+
+
 def gen_badge(entry: dict) -> QLabel:
     b = QLabel("접두" if entry["gen"] == "prefix" else "접미")
     b.setObjectName("BadgePrefix" if entry["gen"] == "prefix" else "BadgeSuffix")
@@ -44,6 +48,12 @@ class ResultRow(QWidget):
             c = QLabel("제작")
             c.setObjectName("BadgeInf")
             c.setStyleSheet("color: #b9e0ff;")
+            h.addWidget(c)
+        src = entry.get("src")
+        if src:
+            c = QLabel(SRC_BADGE.get(src, src))
+            c.setObjectName("BadgeInf")
+            c.setStyleSheet(f"color: {SRC_COLOR.get(src, '#d8c8a0')};")
             h.addWidget(c)
         if entry["inf"]:
             inf = QLabel(db.influence_name(entry["inf"]))
@@ -70,7 +80,8 @@ class SearchDialog(FramelessDialog):
         self.selected_tier: dict | None = None
         self.selected_entry: dict | None = None
         self._cur_entry: dict | None = None
-        self.entries = db.options(slot) + (db.craft_options(slot) if with_craft else [])
+        # with_craft: 아이템 편집(옵션 직접 넣기) — 제작 벤치 · 에센스 · 베일(준) · 화석 옵션까지
+        self.entries = db.options(slot) + (db.craft_options(slot) + db.special_options(slot) if with_craft else [])
         self.resize(980, 640)
 
         v = QVBoxLayout(self.frame)
@@ -112,8 +123,22 @@ class SearchDialog(FramelessDialog):
         chips = QHBoxLayout()
         chips.setSpacing(6)
         self.chip_group = QButtonGroup(self)
-        for i, label in enumerate(["전체", "접두", "접미", "영향력"] + (["제작 벤치"] if with_craft else [])):
+        self.modes = ["all", "prefix", "suffix", "inf"]
+        labels = ["전체", "접두", "접미", "영향력"]
+        if with_craft:
+            self.modes.append("craft")
+            labels.append("제작 벤치")
+            for src in ("essence", "veiled", "delve"):
+                if any(e.get("src") == src for e in self.entries):
+                    self.modes.append(src)
+                    labels.append({"veiled": "베일(준)"}.get(src, SRC_BADGE[src]))
+        tips = {"essence": "에센스로만 붙는 옵션 (경악 · 섬망 · 광기 같은 상위 에센스 포함)",
+                "veiled": "베일 옵션을 해제(준)해서 붙는 옵션",
+                "delve": "화석으로만 붙는 옵션"}
+        for i, label in enumerate(labels):
             b = QPushButton(label)
+            if self.modes[i] in tips:
+                b.setToolTip(tips[self.modes[i]])
             b.setObjectName("FilterChip")
             b.setCheckable(True)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -198,18 +223,20 @@ class SearchDialog(FramelessDialog):
     # ---- 동작 ----
     def _filter(self) -> None:
         words = self.search.live_text().lower().split()
-        mode = self.chip_group.checkedId()
+        mode = self.modes[max(0, self.chip_group.checkedId())]
         shown = 0
         for i, e in enumerate(self.entries):
             ok = all(w in e["_hay"] for w in words)
-            if mode == 1:
+            if mode == "prefix":
                 ok = ok and e["gen"] == "prefix" and not e["inf"]
-            elif mode == 2:
+            elif mode == "suffix":
                 ok = ok and e["gen"] == "suffix" and not e["inf"]
-            elif mode == 3:
+            elif mode == "inf":
                 ok = ok and bool(e["inf"])
-            elif mode == 4:
+            elif mode == "craft":
                 ok = ok and bool(e.get("crafted"))
+            elif mode != "all":
+                ok = ok and e.get("src") == mode
             self.list.item(i).setHidden(not ok)
             shown += ok
         self.count.setText(f"{shown}개 옵션")
@@ -243,6 +270,8 @@ class SearchDialog(FramelessDialog):
         avg = "  ·  평균값 (최소+최대)÷2 로 비교" if e["metric"] == "avg2" else ""
         if e.get("crafted"):
             prefix = "제작 벤치 · "
+        elif e.get("src"):
+            prefix = self.db.special_names.get(e["src"], e["src"]) + " · "
         self.d_en.setText(f"{prefix}{'접두' if e['gen'] == 'prefix' else '접미'}  ·  {e['en']}{avg}")
         self.table.setRowCount(len(e["tiers"]))
         for r, t in enumerate(e["tiers"]):

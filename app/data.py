@@ -72,12 +72,21 @@ class ModDB:
         self.slots: list[dict] = d["slots"]
         self.mods: dict[str, list[dict]] = d["mods"]
         self.crafted: dict[str, list[dict]] = d.get("crafted", {})  # 제작 벤치 옵션
+        # 에센스 · 베일 해제(준) · 화석 전용 옵션 (entry["src"] 로 구분)
+        self.special: dict[str, list[dict]] = d.get("special", {})
+        self.special_names: dict[str, str] = d.get("special_names", {})
         self._slot_by_id = {s["id"]: s for s in self.slots}
-        self._by_key = {e["key"]: e for lst in (*self.mods.values(), *self.crafted.values()) for e in lst}
-        for lst in (*self.mods.values(), *self.crafted.values()):
+        self._by_key = {e["key"]: e for _slot, lst in self.all_lists() for e in lst}
+        for _slot, lst in self.all_lists():
             for e in lst:
                 inf = self.influences.get(e["inf"], "")
-                e["_hay"] = f"{e['ko']} {e['en']} {inf}".lower()
+                src = self.special_names.get(e.get("src", ""), "")
+                names = " ".join(t.get("name", "") for t in e["tiers"]) if src else ""  # 에센스 이름으로도 검색
+                e["_hay"] = f"{e['ko']} {e['en']} {inf} {src} {names}".lower()
+
+    def all_lists(self):
+        """(slot, 옵션 목록) 전부: 일반 · 제작 벤치 · 에센스 등."""
+        return (*self.mods.items(), *self.crafted.items(), *self.special.items())
 
     @property
     def total(self) -> int:
@@ -98,6 +107,9 @@ class ModDB:
 
     def craft_options(self, slot: str) -> list[dict]:
         return self.crafted.get(slot, [])
+
+    def special_options(self, slot: str) -> list[dict]:
+        return self.special.get(slot, [])
 
     def get(self, key: str) -> dict | None:
         return self._by_key.get(key)

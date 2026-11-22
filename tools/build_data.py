@@ -24,6 +24,15 @@ FILES = {
     "bases_en": "base_items.min.json",
     "classes": "item_classes.min.json",
     "bench": "crafting_bench_options.min.json",
+    "essences": "essences.min.json",
+    "bases_ko": "Korean/base_items.min.json",
+}
+
+# 일반 접두/접미 · 영향력 · 제작 벤치 말고 따로 붙는 옵션 (search 다이얼로그의 카테고리)
+SPECIAL = {
+    "essence": "에센스",
+    "veiled": "베일(준)",
+    "delve": "화석",
 }
 
 # (item_class, 한글명, 분류)
@@ -185,6 +194,81 @@ def craft_entries(cls: str, bench: list, mods_en: dict, mods_ko: dict) -> list[d
     return out
 
 
+def ladder_entries(cls: str, src: str, picks: dict[str, str], mods_en: dict, mods_ko: dict,
+                   crafted: bool = False) -> list[dict]:
+    """picks: {mod id: 티어 이름(에센스 이름 등)} → 같은 스탯끼리 묶어 높은 레벨이 T1."""
+    ladders: dict[str, list[str]] = {}
+    for mid in picks:
+        m = mods_en[mid]
+        key = f"{m['type']}|{','.join(s['id'] for s in m['stats'])}|{m['generation_type']}"
+        ladders.setdefault(key, []).append(mid)
+    out = []
+    for key, mids in ladders.items():
+        mids.sort(key=lambda x: (mods_en[x]["required_level"], x), reverse=True)
+        top = mods_en[mids[0]]
+        kind = metric_kind(top["text"])
+        tiers = []
+        for i, mid in enumerate(mids, start=1):
+            m = mods_en[mid]
+            ranges = display_ranges(m["text"].splitlines()[0])
+            lo = metric(kind, [r[0] for r in ranges])
+            hi = metric(kind, [r[1] for r in ranges])
+            tiers.append({
+                "t": i,
+                "lv": m["required_level"],
+                "name": picks[mid] or SPECIAL[src],
+                "text": (mods_ko.get(mid, {}).get("text") or m["text"]).replace("\n", " / "),
+                "lo": min(lo, hi),
+                "hi": max(lo, hi),
+            })
+        e = {
+            "key": f"{cls}|{src}|{key}",
+            "gen": top["generation_type"],
+            "inf": "",
+            "src": src,
+            "ko": template([mods_ko.get(x, {}).get("text") or mods_en[x]["text"] for x in mids]),
+            "en": template([mods_en[x]["text"] for x in mids]),
+            "metric": kind,
+            "decimals": 1 if any(t["lo"] != int(t["lo"]) or t["hi"] != int(t["hi"]) for t in tiers) else 0,
+            "tiers": tiers,
+        }
+        if crafted:
+            e["crafted"] = True
+        out.append(e)
+    out.sort(key=lambda e: (e["gen"], e["ko"]))
+    return out
+
+
+def special_entries(cls: str, base_tags: list[set[str]], mods_en: dict, mods_ko: dict, essences: dict,
+                    names_ko: dict, bench_ids: set[str]) -> list[dict]:
+    out: list[dict] = []
+    # 에센스: 일반 티어와 겹치지 않는 에센스 전용 옵션만 (일반 티어는 이미 접두/접미 목록에 있음)
+    picks: dict[str, str] = {}
+    for eid, ess in essences.items():
+        em = ess.get("mods") or {}
+        mid = em.get(cls) or em.get({"Rune Dagger": "Dagger", "Warstaff": "Staff"}.get(cls, ""))
+        m = mods_en.get(mid) if mid else None
+        if not m or not m.get("is_essence_only") or not m.get("stats") or not m.get("text"):
+            continue
+        if m["generation_type"] not in ("prefix", "suffix"):
+            continue
+        picks.setdefault(mid, (names_ko.get(eid) or {}).get("name") or ess.get("name") or "")
+    out += ladder_entries(cls, "essence", picks, mods_en, mods_ko)
+    # 베일(준) 해제 옵션 · 화석 전용 옵션: 이 장비 베이스 태그로 붙을 수 있는 것
+    for src, domain in (("veiled", "unveiled"), ("delve", "delve")):
+        picks = {}
+        for mid, m in mods_en.items():
+            if m["domain"] != domain or m["generation_type"] not in ("prefix", "suffix"):
+                continue
+            # 벤치에서 다는 베일 옵션(…Crafted)은 제작 벤치 쪽 · 화석의 '상점 판매가' 같은 옵션은 뺌
+            if not m.get("stats") or not m.get("text") or mid in bench_ids or "Crafted" in mid or "sells for" in m["text"]:
+                continue
+            if any(spawn_weight(m, t) > 0 for t in base_tags):
+                picks[mid] = {"veiled": "베일 해제 (준)", "delve": "화석"}[src]
+        out += ladder_entries(cls, src, picks, mods_en, mods_ko)
+    return out
+
+
 def main() -> None:
     refresh = "--refresh" in sys.argv
     mods_en = fetch("mods_en", refresh)
@@ -203,9 +287,13 @@ def main() -> None:
     print(f"candidate mods: {len(candidates)}")
 
     bench = fetch("bench", refresh)
+    essences = fetch("essences", refresh)
+    names_ko = fetch("bases_ko", refresh)
+    bench_ids = {o.get("actions", {}).get("add_explicit_mod") for o in bench} - {None}
     out_slots = []
     out_mods: dict[str, list] = {}
     out_craft: dict[str, list] = {}
+    out_special: dict[str, list] = {}
 
     for cls, ko_name, category in SLOTS:
         base_tags = [
@@ -269,8 +357,10 @@ def main() -> None:
         entries.sort(key=lambda e: (e["inf"] != "", e["inf"], e["gen"], e["ko"]))
         out_mods[cls] = entries
         out_craft[cls] = craft_entries(cls, bench, mods_en, mods_ko)
+        out_special[cls] = special_entries(cls, base_tags, mods_en, mods_ko, essences, names_ko, bench_ids)
         out_slots.append({"id": cls, "ko": ko_name, "en": cls, "category": category})
-        print(f"{cls:28s} {len(entries):4d} options  {len(out_craft[cls]):3d} bench")
+        n = {s: sum(e["src"] == s for e in out_special[cls]) for s in SPECIAL}
+        print(f"{cls:28s} {len(entries):4d} options  {len(out_craft[cls]):3d} bench  {n}")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(
@@ -282,6 +372,8 @@ def main() -> None:
                 "slots": out_slots,
                 "mods": out_mods,
                 "crafted": out_craft,
+                "special_names": SPECIAL,
+                "special": out_special,
             },
             ensure_ascii=False,
             separators=(",", ":"),

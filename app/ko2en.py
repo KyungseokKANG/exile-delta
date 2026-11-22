@@ -91,7 +91,9 @@ class Result:
 
 class _Dict:
     def __init__(self):
-        d = json.loads(resource_path("data/ko_en.json").read_text(encoding="utf-8"))
+        raw = resource_path("data/ko_en.json").read_text(encoding="utf-8")
+        # 새 게임 데이터는 젬 이름 앞에 폭 없는 공백(U+200B)이 붙어 있음 → PoB 문장과 안 맞으니 지움
+        d = json.loads(raw.replace("​", "").replace("\\u200b", ""))
         self.bases: dict[str, str] = d["bases"]
         self.uniques: dict[str, str] = d.get("uniques", {})
         self.implicit_kinds: dict[str, list[str]] = d.get("implicit_kinds", {})
@@ -118,6 +120,7 @@ def _build_index(pairs) -> dict[str, list[list]]:
 
 def _lookup(idx: dict[str, list[list]], line: str):
     """(정규식 match, 결과 템플릿) 들 — 그 골격 묶음만 필요할 때 컴파일."""
+    line = line.replace("​", "")
     for e in idx.get(_skeleton_line(line), ()):
         if e[3] is None:
             e[3] = _regex(e[0])
@@ -132,7 +135,7 @@ def _skeleton_tpl(tpl: str) -> str:
 
 
 def _skeleton_line(line: str) -> str:
-    return NUM_RE.sub("#", line).strip()
+    return NUM_RE.sub("#", line.replace("​", "")).strip()
 
 
 def _regex(tpl: str) -> re.Pattern:
@@ -236,7 +239,16 @@ def en_to_ko(line: str) -> str | None:
         out = _fill(ko, m.groupdict())
         if not PH_RE.search(out):
             return out
+    # PoB 는 'Supported by Level 18 Burning Damage Support' 처럼 젬 이름 끝에 ' Support' 를 붙임 (게임 문장엔 없음)
+    sm = _SUPPORT_RE.match(line)
+    if sm:
+        r = en_to_ko(sm.group(1))
+        if r is not None:
+            return r
     return None
+
+
+_SUPPORT_RE = re.compile(r"^(.* Supported by [Ll]evel \d+ .+?) Support$")
 
 
 _PASSIVE_CACHE: dict[str, str] = {}

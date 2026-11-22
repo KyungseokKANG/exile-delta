@@ -25,7 +25,7 @@ def _index() -> dict[str, dict[str, set[str]]]:
             from data import ModDB
 
             db = ModDB()
-            for slot, lst in (*db.mods.items(), *db.crafted.items()):
+            for slot, lst in db.all_lists():
                 for e in lst:
                     gen = e.get("gen")
                     if gen not in KO:
@@ -160,7 +160,7 @@ def _hybrids():
             from data import ModDB
 
             db = ModDB()
-            for slot, lst in (*db.mods.items(), *db.crafted.items()):
+            for slot, lst in db.all_lists():
                 for e in lst:
                     gen = e.get("gen")
                     ko_parts = (e.get("ko") or "").split(" / ")
