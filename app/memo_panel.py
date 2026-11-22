@@ -11,7 +11,7 @@ import ctypes
 import sys
 
 from PySide6.QtCore import QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -93,7 +93,7 @@ class MemoPopup(QWidget):
         self.body.setTextFormat(Qt.TextFormat.PlainText)
         self.body.setWordWrap(True)
         self.body.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self.body.setStyleSheet("color: #f1e6cf; background: transparent;")
+        self.set_font_size(12)
         v.addWidget(self.body, 1)
         for lb in (self.hint, self.body):
             lb.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -126,9 +126,8 @@ class MemoPopup(QWidget):
         self.body.setText(text)
 
     def set_font_size(self, pt: int) -> None:
-        f = QFont(self.body.font())
-        f.setPointSize(pt)
-        self.body.setFont(f)
+        # 앱 전체 스타일시트가 QLabel 글자 크기를 정해 둬서 setFont 는 무시됨 → 스타일시트로 지정
+        self.body.setStyleSheet(f"color: #f1e6cf; background: transparent; font-size: {int(pt)}pt;")
 
     def set_alpha(self, a: int) -> None:
         self.alpha = max(0, min(255, a))
@@ -227,7 +226,6 @@ class MemoCard:
         self.edit.setPlaceholderText(PLACEHOLDER)
         self.edit.setPlainText(str(m.get("text") or ""))
         self.edit.setMinimumHeight(260)
-        self.edit.setStyleSheet("QPlainTextEdit { font-size: 11pt; }")
         v.addWidget(self.edit)
 
         row = QHBoxLayout()
@@ -256,7 +254,7 @@ class MemoCard:
 
         self.popup = MemoPopup(lambda g: _save(geom=g))
         self.popup.set_text(self.edit.toPlainText())
-        self.popup.set_font_size(self.size.value())
+        self._apply_font(self.size.value())
         self.popup.set_alpha(self.alpha.value())
         g = m.get("geom") or {}
         rect = QRect(g.get("x", 80), g.get("y", 80), g.get("w", 360), g.get("h", 180))
@@ -270,7 +268,7 @@ class MemoCard:
         self.edit.textChanged.connect(self._on_text)
         self.show_btn.clicked.connect(self._toggle_show)
         self.pin_btn.clicked.connect(self._toggle_pin)
-        self.size.valueChanged.connect(lambda n: (self.popup.set_font_size(n), _save(font=n)))
+        self.size.valueChanged.connect(lambda n: (self._apply_font(n), _save(font=n)))
         self.alpha.valueChanged.connect(lambda a: (self.popup.set_alpha(a), _save(alpha=a)))
         app = QApplication.instance()
         if app is not None:
@@ -278,6 +276,11 @@ class MemoCard:
         if m.get("shown"):
             QTimer.singleShot(0, self.popup.show_memo)
         QTimer.singleShot(0, self._sync)
+
+    def _apply_font(self, pt: int) -> None:
+        """글자 크기: 입력칸과 띄운 메모에 똑같이."""
+        self.edit.setStyleSheet(f"QPlainTextEdit {{ font-size: {int(pt)}pt; }}")
+        self.popup.set_font_size(pt)
 
     def _on_text(self) -> None:
         self.popup.set_text(self.edit.toPlainText())

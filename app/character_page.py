@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import html
+import json
 import zlib
 
 from PySide6.QtCore import QPoint, Qt, QTimer
@@ -891,9 +892,17 @@ class CharacterPage(QWidget):
                 self.install_engine()
             return
         settings = load_settings()
+        before = json.loads(json.dumps(settings))
         dlg = ImportDialog(settings, self.window())
         ok = dlg.exec()
-        save_settings(settings)
+        # 창이 떠 있는 동안 다른 곳(메모 등)이 저장한 값을 덮어쓰지 않게, 이 창이 바꾼 것만 최신 설정에 합침
+        latest = load_settings()
+        for k, v in settings.items():
+            if before.get(k) != v:
+                latest[k] = v
+        for k in before.keys() - settings.keys():
+            latest.pop(k, None)
+        save_settings(latest)
         if not ok:
             return
         self._import_payload(dlg.kind, dlg.payload, dlg.name, dlg.source, None)
