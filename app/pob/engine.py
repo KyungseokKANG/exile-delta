@@ -99,6 +99,10 @@ class PobEngine:
         self.g.es_load_character_json(js.encode("utf-8"), prev_xml.encode("utf-8") if prev_xml else None)
         return self.summary()
 
+    def vaal_defaults(self, keep: list[str] | None) -> bool:
+        """바알 젬의 바알 쪽 스킬을 끔 — keep('장착 칸|젬 이름')에 든 것만 켬."""
+        return bool(self.g.es_vaal_defaults("\n".join(keep or []).encode("utf-8")))
+
     def save_xml(self) -> str:
         return self.g.es_save_xml().decode("utf-8")
 
@@ -185,8 +189,10 @@ class PobEngine:
         return _to_py(self.g.es_optimize(json.dumps(spec).encode("utf-8")))
 
     # ---- 스킬 젬 ----
-    def set_gem(self, group: int, gem: int, level=None, quality=None, enabled=None) -> dict:
-        return _to_py(self.g.es_set_gem(int(group), int(gem), level, quality, enabled))
+    def set_gem(self, group: int, gem: int, level=None, quality=None, enabled=None, side=None) -> dict:
+        """side: 바알 젬일 때 1 = 바알 쪽 스킬, 2 = 일반 쪽 스킬만 켜고 끔 (없으면 젬 전체)."""
+        return _to_py(self.g.es_set_gem(int(group), int(gem), level, quality, enabled,
+                                        int(side) if side else None))
 
     def gem_impact(self, skip: int = 0, limit: int | None = None) -> dict:
         return _to_py(self.g.es_gem_impact(int(skip), limit))

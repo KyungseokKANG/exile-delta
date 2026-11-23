@@ -16,7 +16,9 @@ POS, NEG, DIM = "#7fc46a", "#e0644c", "#968b7a"
 
 
 def gem_ko(name: str) -> str:
-    ko = config_ko._load_names().get(name, "")
+    names = config_ko._load_names()
+    # 보조젬은 한글 자료에 'Multiple Totems Support' → '다중 토템 보조' 로 들어 있음
+    ko = names.get(name, "") or names.get(f"{name} Support", "")
     return f"{ko} <span style='color:{DIM}; font-size:9pt'>{html.escape(name)}</span>" if ko and ko != name else html.escape(name)
 
 
@@ -109,11 +111,14 @@ class GemsCard:
                                 alive=lambda: self._gen == gen and self.cid == cid)
 
     # ------------------------------------------------------------ 표시
-    def _delta(self, base: dict, out: dict | None, label: str) -> str:
+    @staticmethod
+    def _cell(base: dict, out: dict | None, label: str) -> tuple[str, str]:
+        """영향 칸 하나 (레벨 +1 / 레벨 -1 / 퀄리티 +5): 칸에는 DPS · EHP 만 짧게, 최대 피격은 툴팁으로.
+        반환 (칸 HTML, 툴팁 HTML). 바뀌는 게 없으면 칸은 '—'."""
         if not out:
-            return ""
+            return "", ""
         dk = "FullDPS" if base.get("FullDPS") else "CombinedDPS"
-        cells = []
+        lines = []
         for key, nm in ((dk, "DPS"), ("TotalEHP", "EHP")):
             a, b = base.get(key) or 0.0, out.get(key) or 0.0
             if not a or a >= 1e299 or b >= 1e299:
@@ -122,15 +127,16 @@ class GemsCard:
             if abs(p) < 0.05:
                 continue
             col = POS if p > 0 else NEG
-            cells.append(f"{nm} <b style='color:{col}'>{p:+.1f}%</b>")
+            lines.append(f"<span style='color:{DIM}'>{nm}</span> <b style='color:{col}'>{p:+.1f}%</b>")
         from statfmt import maxhit_cells
 
         mh = maxhit_cells(base, out)
-        if mh:
-            cells.append(f"<span style='color:{DIM}'>최대피격</span> " + " ".join(mh))
-        if not cells:
-            return ""
-        return f"<span style='color:#c8a96a'>{label}</span> " + " &nbsp;".join(cells)
+        tip = "<br>".join(lines + ([f"최대 피격 " + " ".join(mh)] if mh else []))
+        if not lines and mh:
+            lines.append(f"<span style='color:{DIM}'>최대 피격만</span>")
+        if not lines:
+            return f"<span style='color:#4a4236'>—</span>", ""
+        return "<br>".join(lines), (f"<b>{label}</b><br>{tip}" if tip else "")
 
     @staticmethod
     def _clear(lay) -> None:
@@ -172,10 +178,17 @@ class GemsCard:
         stale = (f" &nbsp;<span style='color:#e8b65a'>· 값이 바뀌어 영향값을 다시 계산하는 중입니다</span>"
                  if self.impact and self.impact_stale else "")
         self.info.setText(
-            "◉ = 주 스킬 · 레벨·퀄리티를 바꾸면 바로 계산되어 위 결과에 반영 · 젬 체크 해제 = 그 젬을 끈 상태"
-            f"<br><span style='color:{DIM}'>오른쪽: 레벨 +1 / -1, 퀄리티 +5 했을 때 변화 "
-            f"(Full DPS 가 있으면 Full DPS 기준)</span>{stale}")
-        row = 0
+            "◉ = 주 스킬 · 레벨·퀄리티를 바꾸면 바로 계산되어 위 결과에 반영 · 체크 해제 = 그 젬을 끈 상태"
+            f"<br><span style='color:{DIM}'>오른쪽 세 칸: 그렇게 바꿨을 때 DPS · EHP 변화 "
+            f"(Full DPS 가 있으면 Full DPS 기준 · 칸에 마우스를 올리면 최대 피격까지)</span>{stale}")
+        # 칸 배치: 체크 | 이름 | 레벨 | 퀄리티 | 단계·토템 수 | 레벨+1 | 레벨-1 | 퀄+5
+        C_CHK, C_NAME, C_LV, C_QU, C_KN, C_UP, C_DN, C_QP = range(8)
+        NCOL = 8
+        for col, txt in ((C_LV, "레벨"), (C_QU, "퀄리티"), (C_UP, "레벨 +1"), (C_DN, "레벨 −1"), (C_QP, "퀄리티 +5")):
+            hd = QLabel(txt)
+            hd.setStyleSheet(f"color: {DIM}; font-size: 9pt;")
+            self.grid.addWidget(hd, 0, col)
+        row = 1
         for gi, g in enumerate(groups, start=1):
             gems = g.get("gems") or []
             if not gems:
@@ -221,20 +234,21 @@ class GemsCard:
             fd.toggled.connect(lambda on, gi=gi: self.page._set_group(gi, full_dps=on))
             hl.addWidget(en)
             hl.addWidget(fd)
-            if row > 0:
+            if row > 1:
                 # 소켓 그룹(메인 스킬) 사이 여백 + 옅은 구분선
                 sep = QFrame()
                 sep.setFrameShape(QFrame.Shape.HLine)
                 sep.setStyleSheet("color: #2c251c; background: #2c251c; max-height: 1px; margin: 0;")
-                self.grid.setRowMinimumHeight(row, 26)
-                self.grid.addWidget(sep, row, 0, 1, 5, Qt.AlignmentFlag.AlignVCenter)
+                self.grid.setRowMinimumHeight(row, 22)
+                self.grid.addWidget(sep, row, 0, 1, NCOL, Qt.AlignmentFlag.AlignVCenter)
                 row += 1
-            self.grid.addWidget(h, row, 0, 1, 5)
+            self.grid.addWidget(h, row, 0, 1, NCOL)
             row += 1
             knobs = g.get("knobs") or []
             if isinstance(knobs, dict):  # (Lua 표 → 번호 키 dict 로 올 때)
                 knobs = [knobs[k] for k in sorted(knobs, key=lambda x: int(x))]
-            for ii, under, orphan, sk in self._order(g, gems):
+            full_dps = bool(g.get("includeInFullDPS"))
+            for ii, under, orphan, sk, side in self._vaal_rows(g, gems, self._order(g, gems)):
                 if isinstance(ii, dict):
                     # 아이템이 주는 보조 (젬 목록엔 없음 · 아이템 옵션이라 여기서 못 바꿈)
                     nm = QLabel("&nbsp;&nbsp;&nbsp;└ " + gem_ko(ii["name"]) +
@@ -243,30 +257,38 @@ class GemsCard:
                     nm.setStyleSheet("color: #9fb5ff;")
                     nm.setToolTip("장착한 아이템 옵션으로 붙는 보조젬이에요 (예: '장착된 젬이 레벨 20 화상 피해 보조를 받음'). "
                                   "레벨은 아이템 옵션이라 여기서 바꿀 수 없어요.")
-                    self.grid.addWidget(nm, row, 1)
-                    # 다른 보조젬 줄의 레벨·퀄리티 칸과 같은 자리에 (레벨 칸 폭 84 + 퀄리티 칸 폭 76)
-                    lvl = QLabel(f"&nbsp;&nbsp;Lv {int(ii.get('level') or 0)}")
+                    self.grid.addWidget(nm, row, C_NAME)
+                    lvl = QLabel(f"&nbsp;Lv {int(ii.get('level') or 0)}")
                     lvl.setTextFormat(Qt.TextFormat.RichText)
                     lvl.setStyleSheet(f"color: {DIM};")
-                    lvl.setFixedWidth(84)
-                    gap = QWidget()
-                    gap.setFixedWidth(76)
-                    ib = QHBoxLayout()
-                    ib.setSpacing(6)
-                    ib.addWidget(lvl)
-                    ib.addWidget(gap)
-                    self.grid.addLayout(ib, row, 2)
-                    self.grid.addWidget(QLabel(f"<span style='color:{DIM}'>아이템이 주는 보조젬</span>"), row, 3)
+                    self.grid.addWidget(lvl, row, C_LV)
                     row += 1
                     continue
                 gem = gems[ii - 1]
                 from_item = bool(gem.get("fromItem"))
                 chk = QCheckBox()
-                chk.setChecked(bool(gem.get("enabled", True)))
+                if side:
+                    # 바알 젬: 이 줄은 바알 쪽(1) 또는 일반 쪽(2) 스킬 하나 — 체크는 그 스킬만 켜고 끔
+                    v_on = self._vaal_list(gem["vaal"].get("on"))
+                    side_on = bool(gem.get("enabled", True)) and len(v_on) >= side and bool(v_on[side - 1])
+                    chk.setChecked(side_on)
+                    chk.setToolTip("이 스킬만 켜고 끕니다 (같은 젬의 다른 쪽 스킬은 그대로)")
+                    vkey = f"{g.get('slot') or ''}|{gem['name']}"
+                    chk.toggled.connect(lambda on, gi=gi, ii=ii, side=side, vkey=vkey:
+                                        self._set(gi, ii, enabled=on, side=side, vaal_key=vkey))
+                else:
+                    chk.setChecked(bool(gem.get("enabled", True)))
+                    chk.toggled.connect(lambda on, gi=gi, ii=ii: self._set(gi, ii, enabled=on))
                 chk.setEnabled(ready and not from_item)
-                chk.toggled.connect(lambda on, gi=gi, ii=ii: self._set(gi, ii, enabled=on))
-                self.grid.addWidget(chk, row, 0)
-                if under:
+                self.grid.addWidget(chk, row, C_CHK)
+                if side:
+                    v_names = self._vaal_list(gem["vaal"].get("names"))
+                    sname = v_names[side - 1] if len(v_names) >= side else gem["name"]
+                    what = "바알 스킬" if side == 1 else "일반 스킬"
+                    label = (gem_ko(sname) + f" <span style='color:{DIM}; font-size:9pt'>({what})</span>")
+                    if not side_on:
+                        label += f" <span style='color:{NEG}; font-size:9pt'>꺼짐</span>"
+                elif under:
                     label = "&nbsp;&nbsp;&nbsp;└ " + gem_ko(gem["name"])
                 elif orphan:
                     label = (gem_ko(gem["name"]) +
@@ -276,65 +298,76 @@ class GemsCard:
                 name = QLabel(label)
                 name.setTextFormat(Qt.TextFormat.RichText)
                 name.setStyleSheet(f"color: {'#9fb5ff' if gem.get('support') else '#ddd5c6'};")
+                tip = gem["name"]  # 영문 이름은 툴팁으로 (칸이 길어져 줄이 밀리지 않게)
                 if under:
-                    name.setToolTip("위 스킬에 붙는 보조젬 (같은 보조젬이 여러 스킬에 붙으면 스킬마다 보여요 — 한 곳에서 바꾸면 같이 바뀜)")
-                self.grid.addWidget(name, row, 1)
+                    tip += "\n위 스킬에 붙는 보조젬 (같은 보조젬이 여러 스킬에 붙으면 스킬마다 보여요 — 한 곳에서 바꾸면 같이 바뀜)"
+                name.setToolTip(tip)
+                self.grid.addWidget(name, row, C_NAME)
                 lv = QSpinBox()
                 lv.setRange(1, 40)
                 lv.setValue(int(gem.get("level") or 1))
-                lv.setPrefix("Lv ")
                 lv.setToolTip(f"젬 레벨 (일반 최대 {gem.get('maxLevel') or 20}, 타락으로 +1)")
                 lv.setEnabled(ready and not from_item)
-                lv.setFixedWidth(84)
+                lv.setFixedWidth(64)
                 qu = QSpinBox()
                 qu.setRange(0, 40)
                 qu.setValue(int(gem.get("quality") or 0))
                 qu.setSuffix(" %")
                 qu.setToolTip("젬 퀄리티 (일반 최대 20%, 타락 23%)")
                 qu.setEnabled(ready and not from_item)
-                qu.setFixedWidth(76)
+                qu.setFixedWidth(64)
                 # 화살표·입력 모두: 마지막 값만 잠시 뒤에 계산 (연속 클릭 시 여러 번 계산하지 않게)
                 lv.valueChanged.connect(lambda v, gi=gi, ii=ii, cur=gem.get("level"): self._later(
                     (gi, ii, "level"), lambda: v != cur and self._set(gi, ii, level=v)))
                 qu.valueChanged.connect(lambda v, gi=gi, ii=ii, cur=gem.get("quality"): self._later(
                     (gi, ii, "quality"), lambda: v != cur and self._set(gi, ii, quality=v)))
-                box = QHBoxLayout()
-                box.setSpacing(6)
-                box.addWidget(lv)
-                box.addWidget(qu)
+                self.grid.addWidget(lv, row, C_LV)
+                self.grid.addWidget(qu, row, C_QU)
                 # 단계 수 · 활성 지뢰 수 · 토템 수 — 상단 주 스킬 줄과 같은 값 (한쪽 바꾸면 같이 바뀜)
                 kn = knobs[sk - 1] if 0 < sk <= len(knobs) and isinstance(knobs[sk - 1], dict) else None
                 import skill_knobs
+                kbox = QHBoxLayout()
+                kbox.setSpacing(6)
                 for key, val, lo, hi in skill_knobs.spins(kn):
+                    # '개수'는 Full DPS 에 몇 번 셀지라서 Full DPS 에 안 넣은 그룹(오라 · 이동기 등)에선 의미 없음 → 숨김
+                    if key == "count" and not full_dps:
+                        continue
                     sp = skill_knobs.make_spin(
                         key, val, lo, hi, lambda k, v, gi=gi, sk=sk: self.page.set_skill_knob(gi, sk, k, v), kn)
                     sp.setPrefix(skill_knobs.label(key, kn) + " ")
                     sp.setEnabled(ready)
-                    box.addWidget(sp)
-                self.grid.addLayout(box, row, 2)
+                    kbox.addWidget(sp)
+                kbox.addStretch(1)
+                self.grid.addLayout(kbox, row, C_KN)
                 e = imp.get((gi, ii))
+                off = not gem.get("enabled", True) or not g.get("enabled", True) or (side and not side_on)
+                cells: list[tuple[str, str]]
                 if e:
-                    # 변화가 있는 것만 한 줄씩 (Lv+1 / Lv-1 / 퀄+5) — 최대 피격 5속성까지 넣으면 길어서 줄을 나눔
-                    lines = [x for x in (self._delta(base, e.get("up"), "Lv+1"),
-                                         self._delta(base, e.get("down"), "Lv-1"),
-                                         self._delta(base, e.get("qual"), "퀄+5")) if x]
-                    txt = "<br>".join(lines) if lines else f"<span style='color:{DIM}'>레벨·퀄리티 바꿔도 변화 없음</span>"
-                    style = "opacity:0.5;" if self.impact_stale else ""
-                    txt = f"<span style='{style}'>{txt}</span>"
+                    cells = [self._cell(base, e.get("up"), "레벨 +1"),
+                             self._cell(base, e.get("down"), "레벨 −1"),
+                             self._cell(base, e.get("qual"), "퀄리티 +5")]
                 elif from_item:
-                    txt = f"<span style='color:{DIM}'>아이템이 주는 스킬</span>"
-                elif not gem.get("enabled", True) or not g.get("enabled", True):
-                    txt = f"<span style='color:{DIM}'>꺼져 있음</span>"
+                    cells = [(f"<span style='color:{DIM}'>아이템 스킬</span>", ""), ("", ""), ("", "")]
+                elif off:
+                    cells = [(f"<span style='color:{DIM}'>꺼져 있음</span>", ""), ("", ""), ("", "")]
                 else:
-                    txt = f"<span style='color:{DIM}'>{'계산 중…' if self.busy_impact else ''}</span>"
-                lab = QLabel(txt)
-                lab.setTextFormat(Qt.TextFormat.RichText)
-                lab.setWordWrap(True)
-                self.grid.addWidget(lab, row, 3)
+                    cells = [(f"<span style='color:{DIM}'>{'계산 중…' if self.busy_impact else ''}</span>", ""),
+                             ("", ""), ("", "")]
+                for col, (txt, tp) in zip((C_UP, C_DN, C_QP), cells):
+                    lab = QLabel(txt)
+                    lab.setTextFormat(Qt.TextFormat.RichText)
+                    lab.setStyleSheet("font-size: 9pt;" + (" color: #6f665a;" if e and self.impact_stale else ""))
+                    if e and self.impact_stale:
+                        lab.setEnabled(False)  # 예전 값 (다시 계산 중) — 흐리게
+                    if tp:
+                        lab.setToolTip(tp)
+                    self.grid.addWidget(lab, row, col)
                 row += 1
-        self.grid.setColumnStretch(3, 1)
+        self.grid.setColumnStretch(C_NAME, 1)
+        for col in (C_UP, C_DN, C_QP):
+            self.grid.setColumnMinimumWidth(col, 104)
         if not groups:
-            self.grid.addWidget(QLabel("PoB 엔진에서 스킬을 읽는 중…"), 0, 0, 1, 4)
+            self.grid.addWidget(QLabel("PoB 엔진에서 스킬을 읽는 중…"), 0, 0, 1, NCOL)
 
     @staticmethod
     def _order(g: dict, gems: list[dict]) -> list[tuple[int, bool, bool]]:
@@ -375,6 +408,45 @@ class GemsCard:
             out.append((i, sup and has_active_left, sup and not has_active_left, 0))
         return out
 
+    @staticmethod
+    def _vaal_list(v) -> list:
+        if isinstance(v, dict):  # (Lua 표 → 번호 키 dict 로 올 때)
+            return [v[k] for k in sorted(v, key=lambda x: int(x))]
+        return list(v or [])
+
+    @classmethod
+    def _vaal_rows(cls, g: dict, gems: list[dict], order: list) -> list:
+        """_order 결과에 바알 젬 쪽 번호(1 = 바알 쪽, 2 = 일반 쪽, 0 = 해당 없음)를 붙임.
+        바알 젬은 스킬이 둘이라 링크도 둘 → 줄마다 어느 쪽인지 표시. 꺼진 쪽은 PoB 스킬 목록에서 빠져 링크가 없으니
+        (다시 켤 수 있게) 그 쪽 줄을 따로 추가."""
+        actives = cls._vaal_list(g.get("actives"))
+        out, seen, linked = [], set(), set()
+        for ii, under, orphan, sk in order:
+            gem = gems[ii - 1] if isinstance(ii, int) else None
+            vinfo = gem.get("vaal") if gem and not under else None
+            if not vinfo:
+                out.append((ii, under, orphan, sk, 0))
+                continue
+            names = cls._vaal_list(vinfo.get("names"))
+            if 0 < sk <= len(actives):
+                side = 1 if names and actives[sk - 1] == names[0] else 2
+                if (ii, side) not in seen:
+                    seen.add((ii, side))
+                    linked.add(ii)
+                    out.append((ii, under, orphan, sk, side))
+                continue
+            # 링크 없음 (두 쪽 다 꺼졌거나 젬 자체가 꺼짐) → 두 쪽 줄 모두
+            for side in (1, 2):
+                if (ii, side) not in seen:
+                    seen.add((ii, side))
+                    out.append((ii, False, False, 0, side))
+        for ii in sorted(linked):  # 한쪽만 켜진 젬: 꺼진 쪽 줄을 뒤에
+            for side in (1, 2):
+                if (ii, side) not in seen:
+                    seen.add((ii, side))
+                    out.append((ii, False, False, 0, side))
+        return out
+
     def _later(self, key, fn) -> None:
         """연속 클릭은 마지막 값만, 단 젬·항목별로 따로 모아 한꺼번에 (다른 젬 변경이 덮이지 않게)."""
         if not hasattr(self, "_pending"):
@@ -389,8 +461,19 @@ class GemsCard:
         for fn in fns:
             fn()
 
-    def _set(self, group: int, gem: int, level=None, quality=None, enabled=None) -> None:
+    def _set(self, group: int, gem: int, level=None, quality=None, enabled=None, side=None, vaal_key=None) -> None:
         args = {"group": group, "gem": gem}
+        if side:
+            args["side"] = side
+        if side == 1 and vaal_key:
+            # 바알 쪽은 불러올 때마다 기본 꺼짐 → 사용자가 켠 것만 캐릭터에 기록해 두고 그것만 켬
+            c = self.page._cur()
+            if c is not None:
+                keep = [k for k in (c.get("vaal_on") or []) if k != vaal_key]
+                if enabled:
+                    keep.append(vaal_key)
+                c["vaal_on"] = keep
+                self.page.store.save()
         if level is not None:
             args["level"] = level
         if quality is not None:

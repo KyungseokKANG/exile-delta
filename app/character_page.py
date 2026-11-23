@@ -755,7 +755,7 @@ class CharacterPage(QWidget):
         cid = c["id"]
         self.loaded_id = cid
         self.flash(f"{c['name']} 계산 중…")
-        self.client.call("load_xml", {"xml": xml, "name": c["name"]},
+        self.client.call("load_xml", {"xml": xml, "name": c["name"], "vaal_on": list(c.get("vaal_on") or [])},
                          lambda r: self._apply_result(cid, r, record=False), self._on_call_err)
 
     def _apply_result(self, cid: str, r: dict, flash: str = "", record: bool = True) -> None:
@@ -910,6 +910,9 @@ class CharacterPage(QWidget):
     def _import_payload(self, kind: str, payload: str, name: str, source: dict, existing_id: str | None,
                         quiet: bool = False, after=None) -> None:
         cmd, args = ("load_character", {"json": payload}) if kind == "json" else ("load_xml", {"xml": payload})
+        # 바알 젬의 바알 쪽 스킬은 처음엔 꺼진 상태로 (사용자가 켜 둔 것만 켬)
+        ec = next((x for x in self.store.chars if x["id"] == existing_id), None) if existing_id else None
+        args["vaal_on"] = list((ec or {}).get("vaal_on") or [])
         if kind == "json" and existing_id:
             prev = self.store.xml(existing_id)
             if prev:
@@ -1280,7 +1283,8 @@ class CharacterPage(QWidget):
                 tile.setVisible(bool(v))
                 sd = s.get("skillDPS") or []
                 tile.setToolTip("Full DPS 구성\n" + "\n".join(
-                    f"{x.get('name')}{' x' + str(x['count']) if x.get('count', 1) > 1 else ''}  {fmt_big(x.get('dps'))}"
+                    f"{skillnames.ko(x.get('name') or '')}{' x' + str(x['count']) if x.get('count', 1) > 1 else ''}"
+                    f"  {fmt_big(x.get('dps'))}"
                     for x in sd) if sd else "Full DPS 에 포함된 스킬 없음")
             elif k == "TotalEHP":
                 sub = "계산 설정 기준"
@@ -1732,7 +1736,7 @@ class CharacterPage(QWidget):
             if not xml:
                 return None
             self.loaded_id = c["id"]
-            self.client.call("load_xml", {"xml": xml, "name": c["name"]},
+            self.client.call("load_xml", {"xml": xml, "name": c["name"], "vaal_on": list(c.get("vaal_on") or [])},
                              lambda r: self._apply_result(c["id"], r, record=False), self._on_call_err)
         self.client.call("compare", {"text": text, "nodef": list(nodef or [])}, ok, err)
         return c["name"]

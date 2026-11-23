@@ -283,6 +283,44 @@ local function enableVaalSecondary()
 	end
 end
 
+-- 바알 젬의 바알 쪽 스킬은 기본으로 끔 (바알 영혼을 모아 잠깐 쓰는 스킬이라 평소 DPS · Full DPS 를 부풀림).
+-- keysText: 사용자가 켜 둔 바알 젬 '장착 칸|젬 이름' 을 줄바꿈으로 이은 것 — 그것만 켬.
+function es_vaal_defaults(keysText)
+	local keep = { }
+	for k in tostring(keysText or ""):gmatch("[^\n]+") do keep[k] = true end
+	local changed = false
+	for _, g in ipairs(build.skillsTab.socketGroupList) do
+		local gChanged = false
+		for _, gem in ipairs(g.gemList or { }) do
+			local gl = gem.gemData and gem.gemData.vaalGem and gem.gemData.grantedEffectList
+			if gl and gl[1] and gl[2] and not gl[1].support and not gl[2].support then
+				local want = keep[(g.slot or "") .. "|" .. (gem.nameSpec or gl[1].name)] == true
+				if gem.enableGlobal1 ~= want then
+					gem.enableGlobal1 = want
+					gChanged = true
+				end
+				if gem.enableGlobal2 == nil then gem.enableGlobal2 = true gChanged = true end
+			end
+		end
+		if gChanged then
+			build.skillsTab:ProcessSocketGroup(g)
+			changed = true
+		end
+	end
+	if changed then
+		-- 고른 스킬 순번이 목록 밖이 되면 (바알 쪽이 빠져서) 첫 스킬로
+		for _, g in ipairs(build.skillsTab.socketGroupList) do
+			local n = g.displaySkillList and #g.displaySkillList or 0
+			if (g.mainActiveSkill or 1) > math.max(n, 1) then g.mainActiveSkill = 1 end
+		end
+		build.modFlag = true
+		build.buildFlag = true
+		frame()
+		if es_fix_main_active then pcall(es_fix_main_active) end
+	end
+	return changed
+end
+
 local function mainDPS()
 	local o = build.calcsTab.mainOutput or { }
 	return (o.CombinedDPS or 0) + (es_minion_in_main and minionDPS(o) or 0)
@@ -308,6 +346,8 @@ local function fixMainActive()
 	build.buildFlag = true
 	frame()
 end
+
+es_fix_main_active = fixMainActive
 
 -- 처음 가져올 때 주 스킬 고르기. PoB 는 '젬이 가장 많은 그룹'만 봐서 오라 묶음이 뽑히기도 함 →
 -- 링크 많은 순으로 후보를 보고 실제 DPS 가 나오는 첫 그룹 (링크 수가 같으면 DPS 높은 쪽). 다 0 이면 PoB 선택 유지.
@@ -395,7 +435,7 @@ function es_get_prefs()
 			gems[gemName(gem)] = { enabled = gem.enabled ~= false, skillPart = gem.skillPart,
 			                       skillMinion = gem.skillMinion, skillMinionSkill = gem.skillMinionSkill,
 			                       skillStageCount = gem.skillStageCount, skillMineCount = gem.skillMineCount,
-			                       count = gem.count }
+			                       count = gem.count, g1 = gem.enableGlobal1, g2 = gem.enableGlobal2 }
 		end
 		p.groups[#p.groups + 1] = { full = full, names = names, slot = g.slot or "", enabled = g.enabled ~= false,
 		                            groupCount = g.groupCount,
@@ -449,6 +489,10 @@ function es_apply_prefs(p)
 					if pv.skillStageCount then gem.skillStageCount = pv.skillStageCount end
 					if pv.skillMineCount then gem.skillMineCount = pv.skillMineCount end
 					if pv.count then gem.count = pv.count end
+					if gem.gemData and gem.gemData.vaalGem then
+						if pv.g1 ~= nil then gem.enableGlobal1 = pv.g1 end
+						if pv.g2 ~= nil then gem.enableGlobal2 = pv.g2 end
+					end
 				end
 			end
 			if pg.main then build.mainSocketGroup = gi end
@@ -692,6 +736,12 @@ function es_summary()
 				fromItem = gem.fromItem or nil,
 				support = gem.gemData and gem.gemData.grantedEffect and gem.gemData.grantedEffect.support or false,
 			}
+			-- 바알 젬: 스킬이 둘 (1 = 바알 쪽, 2 = 일반 쪽). PoB 젬 칸의 'Enable <스킬>' 체크 두 개와 같음
+			local gl = gem.gemData and gem.gemData.vaalGem and gem.gemData.grantedEffectList
+			if gl and gl[1] and gl[2] and not gl[1].support and not gl[2].support then
+				gems[#gems].vaal = { names = { gl[1].name, gl[2].name },
+				                     on = { gem.enableGlobal1 ~= false, gem.enableGlobal2 == true } }
+			end
 		end
 		local actives = { }
 		-- 액티브마다 실제로 붙는 보조젬 (PoB canGrantedEffectSupportActiveSkill, 꺼진 보조젬도 포함해 판정)
@@ -2039,13 +2089,19 @@ end
 -------------------------------------------------------------------------------
 -- 스킬 젬 레벨 / 퀄리티 (PoB Skills 탭의 Level / Quality 칸과 같은 처리)
 -------------------------------------------------------------------------------
-function es_set_gem(groupIdx, gemIdx, level, quality, enabled)
+function es_set_gem(groupIdx, gemIdx, level, quality, enabled, side)
 	local group = build.skillsTab.socketGroupList[groupIdx]
 	local gem = group and group.gemList[gemIdx]
 	if not gem then return { error = "젬을 찾을 수 없습니다" } end
 	if level then gem.level = math.max(1, math.floor(level)) end
 	if quality then gem.quality = math.max(0, math.floor(quality)) end
-	if enabled ~= nil then gem.enabled = enabled and true or false end
+	if enabled ~= nil and (side == 1 or side == 2) then
+		-- 바알 젬의 한쪽 스킬만 (젬 자체를 끄면 두 스킬이 같이 사라짐)
+		gem["enableGlobal" .. side] = enabled and true or false
+		if enabled then gem.enabled = true end
+	elseif enabled ~= nil then
+		gem.enabled = enabled and true or false
+	end
 	build.skillsTab:ProcessSocketGroup(group)
 	build.skillsTab:AddUndoState()
 	build.modFlag = true

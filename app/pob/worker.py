@@ -56,9 +56,13 @@ def run(port: int, log_path: Path) -> int:
                 raise RuntimeError("engine not initialised")
             elif cmd == "load_xml":
                 result = {"summary": engine.load_xml(args["xml"], args.get("name", ""))}
+                if "vaal_on" in args and engine.vaal_defaults(args["vaal_on"]):
+                    result["summary"] = engine.summary()
                 result["xml"] = engine.save_xml()
             elif cmd == "load_character":
                 result = {"summary": engine.load_character_json(args["json"], args.get("prev_xml"))}
+                if "vaal_on" in args and engine.vaal_defaults(args["vaal_on"]):
+                    result["summary"] = engine.summary()
                 result["xml"] = engine.save_xml()
             elif cmd == "set_main_group":
                 result = {"summary": engine.set_main_group(int(args["index"])), "xml": engine.save_xml()}
@@ -90,7 +94,8 @@ def run(port: int, log_path: Path) -> int:
                     raise RuntimeError(r["error"])
                 result = {"summary": engine.summary(), "xml": engine.save_xml()}
             elif cmd == "set_gem":
-                r = engine.set_gem(args["group"], args["gem"], args.get("level"), args.get("quality"), args.get("enabled")) or {}
+                r = engine.set_gem(args["group"], args["gem"], args.get("level"), args.get("quality"), args.get("enabled"),
+                                    args.get("side")) or {}
                 if r.get("error"):
                     raise RuntimeError(r["error"])
                 result = {"summary": engine.summary(), "xml": engine.save_xml()}
