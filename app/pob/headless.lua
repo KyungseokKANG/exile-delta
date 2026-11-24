@@ -426,6 +426,8 @@ local function copyTable(t)
 	return o
 end
 
+WICKER_SLOTS = { "Head", "Body", "Arm", "Leg" }
+
 function es_get_prefs()
 	local p = { groups = { }, config = { }, flasks = { } }
 	for gi, g in ipairs(build.skillsTab.socketGroupList) do
@@ -447,6 +449,13 @@ function es_get_prefs()
 	for i = 1, 5 do
 		local s = build.itemsTab.slots["Flask " .. i]
 		if s then p.flasks["Flask " .. i] = s.active and true or false end
+	end
+	-- 버들가지 제웅: 계정 가져오기(공개 API)에 안 들어오므로 앱에서 넣은 것을 그대로 유지
+	p.wicker = { }
+	for _, name in ipairs(WICKER_SLOTS) do
+		local s = build.itemsTab.slots[name]
+		local it = s and build.itemsTab.items[s.selItemId]
+		if it then p.wicker[name] = it:BuildRaw() end
 	end
 	return p
 end
@@ -497,6 +506,13 @@ function es_apply_prefs(p)
 			end
 			if pg.main then build.mainSocketGroup = gi end
 			build.skillsTab:ProcessSocketGroup(g)
+		end
+	end
+	for name, raw in pairs(p.wicker or { }) do
+		local s = build.itemsTab.slots[name]
+		if s and (s.selItemId or 0) == 0 then
+			local ok, e = pcall(es_wicker_put, name, raw)
+			if not ok then _ES_LOG("wicker prefs: " .. tostring(e)) end
 		end
 	end
 	local ct = build.configTab
@@ -2084,6 +2100,86 @@ function es_draft_equip(slotName)
 	local fresh = es_newobj("Item", item:BuildRaw())
 	itemsTab:AddItem(fresh, true)
 	return es_set_slot(slotName, fresh.id)
+end
+
+-------------------------------------------------------------------------------
+-- 버들가지 제웅 (3.30 Wickerman): 머리 / 몸통 / 팔 / 다리 칸
+-------------------------------------------------------------------------------
+local wickerCatalog
+function es_wicker_catalog()
+	if wickerCatalog then return wickerCatalog end
+	local out, seen = { }, { }
+	for _, raw in ipairs(data.viscera or { }) do
+		local lines = { }
+		for l in raw:gmatch("[^\r\n]+") do
+			l = l:gsub("^%s+", ""):gsub("%s+$", "")
+			if l ~= "" then lines[#lines + 1] = l end
+		end
+		local name, base = lines[1], lines[2]
+		local b = base and data.itemBases[base]
+		local slot
+		for tag in pairs(b and b.tags or { }) do
+			local s = tag:match("^viscera_(%a+)$")
+			if s then slot = s:gsub("^%l", string.upper) end
+		end
+		local n = tonumber((lines[3] or ""):match("^Implicits: (%d+)")) or 0
+		local mods = { }
+		for i = 4, 3 + n do mods[#mods + 1] = lines[i] end
+		local key = (name or "") .. "\n" .. table.concat(mods, "\n")
+		if slot and #mods > 0 and not seen[key] then
+			seen[key] = true
+			local tier = name:match("^Lesser ") and 1 or name:match("^Greater ") and 3 or 2
+			out[#out + 1] = { name = name, base = base, slot = slot, tier = tier, mods = mods }
+		end
+	end
+	wickerCatalog = out
+	return out
+end
+
+function es_wicker_state()
+	local res = { active = build.spec.treeVersion:find("3_30") ~= nil, slots = { } }
+	for _, name in ipairs(WICKER_SLOTS) do
+		local s = build.itemsTab.slots[name]
+		local it = s and build.itemsTab.items[s.selItemId]
+		if it then
+			local lines = { }
+			for _, l in ipairs(it.implicitModLines or { }) do lines[#lines + 1] = l.line end
+			for _, l in ipairs(it.explicitModLines or { }) do lines[#lines + 1] = l.line end
+			res.slots[name] = { name = it.title or it.name, base = it.baseName, lines = lines }
+		end
+	end
+	return res
+end
+
+-- 칸의 제웅 아이템을 빼고(빌드 아이템 목록에서도 지움) raw 가 있으면 새로 만들어 끼움
+function es_wicker_put(slotName, raw)
+	local itemsTab = build.itemsTab
+	local ok = false
+	for _, n in ipairs(WICKER_SLOTS) do if n == slotName then ok = true end end
+	local slot = ok and itemsTab.slots[slotName]
+	if not slot then return { error = "제웅 칸을 찾을 수 없습니다: " .. tostring(slotName) } end
+	local item
+	if raw and raw ~= "" then
+		item = es_newobj("Item", raw)
+		if not item.base or item.type ~= "Viscera" or not itemsTab:IsItemValidForSlot(item, slotName) then
+			return { error = "이 칸에 넣을 수 없는 제웅 부위입니다" }
+		end
+	end
+	local old = itemsTab.items[slot.selItemId]
+	if old then
+		slot:SetSelItemId(0)
+		itemsTab:DeleteItem(old)
+	end
+	if item then
+		itemsTab:AddItem(item, true)
+		slot:SetSelItemId(item.id)
+	end
+	itemsTab:PopulateSlots()
+	itemsTab:AddUndoState()
+	build.modFlag = true
+	build.buildFlag = true
+	frame()
+	return { ok = true }
 end
 
 -------------------------------------------------------------------------------

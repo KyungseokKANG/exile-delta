@@ -163,6 +163,16 @@ class PobEngine:
     def flasks(self) -> dict:
         return _to_py(self.g.es_flasks())
 
+    # ---- 버들가지 제웅 ----
+    def wicker_catalog(self) -> list:
+        return _to_py(self.g.es_wicker_catalog())
+
+    def wicker_state(self) -> dict:
+        return _to_py(self.g.es_wicker_state())
+
+    def wicker_put(self, slot: str, raw: str) -> dict:
+        return _to_py(self.g.es_wicker_put(slot.encode("utf-8"), (raw or "").encode("utf-8")))
+
     # ---- 아이템 만들기 ----
     def item_catalog(self, slot: str) -> dict:
         return _to_py(self.g.es_item_catalog(slot.encode("utf-8")))

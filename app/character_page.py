@@ -463,8 +463,12 @@ class CharacterPage(QWidget):
                 "PoB Configuration (적 상태, 버프 등)",
                 "피하고 싶은 지도 옵션 고르기 → 지도에 Ctrl+C 하면 경고",
                 "부위별 DPS 최적 옵션 찾기 (실험 기능)",
-                "게임 위에 항상 떠 있는 메모 (에센스 · 바알 · 준 정리용)")
-        for i, name in enumerate(("장비 · 주얼", "스킬 · 젬", "계산 설정", "비선호 지도", "옵션 최적화 (Beta)", "메모")):
+                "게임 위에 항상 떠 있는 메모 (에센스 · 바알 · 준 정리용)",
+                "버들가지 제웅 부위(머리 · 몸통 · 팔 · 다리) 골라 넣기 — 계정 가져오기에는 안 들어와요")
+        # 탭 번호(설정에 저장됨)는 그대로 두고, 제웅 탭(6)만 화면에서 '스킬 · 젬' 바로 오른쪽에 둔다
+        order = (0, 1, 6, 2, 3, 4, 5)
+        for i, name in enumerate(("장비 · 주얼", "스킬 · 젬", "계산 설정", "비선호 지도", "옵션 최적화 (Beta)", "메모",
+                                  "버들가지 제웅")):
             b = QPushButton(name)
             b.setObjectName("SubTab")
             b.setCheckable(True)
@@ -475,8 +479,9 @@ class CharacterPage(QWidget):
                             "background: #17140f; color: #968b7a; font-size: 10pt; } "
                             "QPushButton#SubTab:checked { background: #2a231a; color: #ead197; border-color: #86704a; } "
                             "QPushButton#SubTab:hover:!checked { color: #ddd5c6; }")
-            sub.addWidget(b)
             self.sub_btns.append(b)
+        for i in order:
+            sub.addWidget(self.sub_btns[i])
         sub.addStretch(1)
         ov.addLayout(sub)
 
@@ -491,14 +496,15 @@ class CharacterPage(QWidget):
         v = QVBoxLayout(host)
         v.setContentsMargins(0, 0, 6, 0)
         v.setSpacing(12)
-        self.sub_pages = [QWidget(), QWidget(), QWidget(), QWidget(), QWidget(), QWidget()]
+        self.sub_pages = [QWidget() for _ in range(7)]
         page_eq = QVBoxLayout(self.sub_pages[0])
         page_gem = QVBoxLayout(self.sub_pages[1])
         page_cfg = QVBoxLayout(self.sub_pages[2])
         page_map = QVBoxLayout(self.sub_pages[3])
         page_beta = QVBoxLayout(self.sub_pages[4])
         page_memo = QVBoxLayout(self.sub_pages[5])
-        for pl in (page_eq, page_gem, page_cfg, page_map, page_beta, page_memo):
+        page_wick = QVBoxLayout(self.sub_pages[6])
+        for pl in (page_eq, page_gem, page_cfg, page_map, page_beta, page_memo, page_wick):
             pl.setContentsMargins(0, 0, 0, 0)
             pl.setSpacing(12)
 
@@ -513,6 +519,12 @@ class CharacterPage(QWidget):
         gem_card, gmv = card("스킬 그룹 · 젬")
         self.gems = GemsCard(self, gmv)
         page_gem.addWidget(gem_card)
+
+        from wicker_panel import WickerCard
+
+        wick_card, wkv = card("버들가지 제웅  ·  머리 · 몸통 · 팔 · 다리")
+        self.wicker = WickerCard(self, wkv)
+        page_wick.addWidget(wick_card)
 
         from beta_panel import BetaCard
 
@@ -591,6 +603,8 @@ class CharacterPage(QWidget):
             self._render_config((self._cur() or {}).get("summary") or {})
         if hasattr(self, "gems"):
             self.gems.on_shown(i == 1)
+        if hasattr(self, "wicker"):
+            self.wicker.on_shown(i == 6)
         if hasattr(self, "beta") and i == 4:
             self.beta.on_shown()
         if save:
@@ -709,6 +723,7 @@ class CharacterPage(QWidget):
         if self.client.state == "ready":
             self.equip.on_result(c["id"])  # 다른 캐릭터면 장비 목록·기여도 새로
         self.gems.on_summary(c["id"])
+        self.wicker.on_summary(c["id"])
         if self._tree_win is not None and self._tree_win.isVisible() and self._tree_win.cid != c["id"]:
             self._tree_win.bind(c)
 
@@ -793,6 +808,7 @@ class CharacterPage(QWidget):
         if self._cur() is c:
             self.equip.on_result(cid)
             self.gems.on_summary(cid)
+            self.wicker.on_summary(cid)
             sb.setValue(pos)
             QTimer.singleShot(0, lambda: sb.setValue(pos))
         self.flash(flash or f"{c['name']} 계산 완료")
@@ -1003,7 +1019,8 @@ class CharacterPage(QWidget):
             st = sets.get(items_el.get("activeItemSet")) or next(iter(sets.values()), None)
             if st is not None:
                 out.append(sorted((s.get("name") or "", texts.get(s.get("itemId") or "", ""))
-                                  for s in st.findall("Slot") if (s.get("itemId") or "0") != "0"))
+                                  for s in st.findall("Slot") if (s.get("itemId") or "0") != "0"
+                                  and s.get("name") not in ("Head", "Body", "Arm", "Leg")))  # 제웅은 다시 가져와도 유지
         tree = root.find("Tree")
         if tree is not None:
             specs = tree.findall("Spec")

@@ -107,6 +107,14 @@ def run(port: int, log_path: Path) -> int:
                 result = engine.gem_impact(args.get("skip") or 0, args.get("limit"))
             elif cmd == "flasks":
                 result = engine.flasks()
+            elif cmd == "wicker":
+                result = {"catalog": engine.wicker_catalog() if args.get("catalog") else None,
+                          "state": engine.wicker_state()}
+            elif cmd == "wicker_put":
+                r = engine.wicker_put(args["slot"], args.get("raw") or "") or {}
+                if r.get("error"):
+                    raise RuntimeError(r["error"])
+                result = {"summary": engine.summary(), "xml": engine.save_xml()}
             elif cmd == "item_catalog":
                 result = engine.item_catalog(args["slot"])
             elif cmd in ("draft_new", "draft_edit"):
