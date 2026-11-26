@@ -75,15 +75,59 @@ local function es_desugar_line(line)
 	if code and code ~= "" then rhs = code else comment = nil end
 	return ind .. lhs .. " = " .. lhs .. " " .. op .. " (" .. rhs .. ")" .. (comment and (" " .. comment) or "")
 end
+-- PoB 2.69+ 는 안전 탐색(a?.b, (x)?.:lower())도 씀 → es_sn / es_sm 호출로 바꿔서 읽음
+function es_sn(o, k)
+	if o == nil then return nil end
+	return o[k]
+end
+function es_sm(o, k, ...)
+	if o == nil then return nil end
+	return o[k](o, ...)
+end
+local SAFE_KW = { ["and"] = true, ["or"] = true, ["not"] = true, ["return"] = true, ["then"] = true, ["do"] = true,
+	["else"] = true, ["elseif"] = true, ["in"] = true, ["if"] = true, ["while"] = true, ["until"] = true, ["local"] = true }
+local function es_desugar_safe(line)
+	if not line:find("?.", 1, true) then return line end
+	local function obj(pre, body)
+		if body ~= "" and SAFE_KW[pre] then return pre .. " ", body end
+		return "", pre .. body
+	end
+	local function call(pre, body, m, empty)
+		local k, o = obj(pre, body)
+		return k .. "es_sm(" .. o .. ", \"" .. m .. "\"" .. (empty and ")" or ", ")
+	end
+	local function field(pre, body, f)
+		local k, o = obj(pre, body)
+		return k .. "es_sn(" .. o .. ", \"" .. f .. "\")"
+	end
+	for _ = 1, 10 do
+		local before = line
+		-- 메서드 호출  X?.:m(...)
+		line = line:gsub("([%a_][%w_%.:]*)(%b())%?%.:([%a_][%w_]*)%(%s*%)", function(p, b, m) return call(p, b, m, true) end)
+		line = line:gsub("([%a_][%w_%.:]*)(%b())%?%.:([%a_][%w_]*)%(", function(p, b, m) return call(p, b, m) end)
+		line = line:gsub("(%b())%?%.:([%a_][%w_]*)%(%s*%)", function(b, m) return call("", b, m, true) end)
+		line = line:gsub("(%b())%?%.:([%a_][%w_]*)%(", function(b, m) return call("", b, m) end)
+		line = line:gsub("([%a_][%w_%.]*)%?%.:([%a_][%w_]*)%(%s*%)", function(o, m) return call(o, "", m, true) end)
+		line = line:gsub("([%a_][%w_%.]*)%?%.:([%a_][%w_]*)%(", function(o, m) return call(o, "", m) end)
+		-- 필드  X?.f
+		line = line:gsub("([%a_][%w_%.:]*)(%b())%?%.([%a_][%w_]*)", field)
+		line = line:gsub("(%b())%?%.([%a_][%w_]*)", function(b, f) return field("", b, f) end)
+		line = line:gsub("([%a_][%w_%.]*)%?%.([%a_][%w_]*)", function(o, f) return field(o, "", f) end)
+		if line == before then break end
+	end
+	return line
+end
 function es_loadfile(fileName)
 	local func, err = loadfile(fileName)
-	if func or not tostring(err):find("expected near") then return func, err end
+	if func or not (tostring(err):find("expected near") or tostring(err):find("near '?'", 1, true)) then
+		return func, err
+	end
 	local f = io.open(fileName, "rb")
 	if not f then return func, err end
 	local src = f:read("*a")
 	f:close()
 	local out = {}
-	for line in (src .. "\n"):gmatch("([^\n]*)\n") do out[#out + 1] = es_desugar_line(line) end
+	for line in (src .. "\n"):gmatch("([^\n]*)\n") do out[#out + 1] = es_desugar_safe(es_desugar_line(line)) end
 	local func2, err2 = loadstring(table.concat(out, "\n"), "@" .. fileName)
 	if func2 then return func2 end
 	return nil, err2
