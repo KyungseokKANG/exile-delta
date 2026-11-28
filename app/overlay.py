@@ -122,6 +122,18 @@ class Overlay(QWidget):
         x.setObjectName("OverlayClose")
         head.addWidget(x, 0, Qt.AlignmentFlag.AlignTop)
         self.v.addLayout(head)
+        # 무기면 무기 자체 DPS (캐릭터와 상관없이 무기 글만으로)
+        try:
+            import weapon_dps
+
+            w = weapon_dps.calc(item.text)
+        except Exception:  # noqa: BLE001 - 표시용 부가 정보: 못 읽으면 그냥 생략
+            w = None
+        if w:
+            line, tip = weapon_dps.html_line(w, DIM)
+            wl = self._label(line, "OverlayRow")
+            wl.setToolTip(tip)
+            self.v.addWidget(wl)
 
         if not item.slot:
             self.v.addWidget(self._label(f"<span style='color:{DIM}'>필터 대상이 아닌 아이템 종류입니다 "

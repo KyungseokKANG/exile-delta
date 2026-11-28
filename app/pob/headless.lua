@@ -2329,6 +2329,34 @@ local function zeroDefs(item, off)
 	end
 end
 
+-- 무기 자체 DPS (PoB 아이템 툴팁과 같은 값): (최소+최대)/2 × 초당 공격, 퀄리티 20% 로 했을 때 값도
+local function weaponInfo(item)
+	local w = item and item.weaponData and item.weaponData[1]
+	if not w or not w.AttackRate or (w.TotalDPS or 0) <= 0 then return nil end
+	local ranges = { }
+	for _, t in ipairs({ "Fire", "Cold", "Lightning" }) do
+		if w[t .. "Min"] then ranges[#ranges + 1] = { w[t .. "Min"], w[t .. "Max"], t } end
+	end
+	local r = { phys = w.PhysicalDPS or 0, ele = w.ElementalDPS or 0, chaos = w.ChaosDPS or 0, total = w.TotalDPS,
+		aps = w.AttackRate, crit = w.CritChance, quality = item.quality or 0,
+		locked = (item.corrupted or item.mirrored) and true or false,
+		phys_range = w.PhysicalMin and { w.PhysicalMin, w.PhysicalMax } or nil, ele_ranges = ranges,
+		chaos_range = w.ChaosMin and { w.ChaosMin, w.ChaosMax } or nil }
+	if r.phys > 0 and r.quality < 20 and not r.locked then
+		local ok, q20 = pcall(function()
+			local c = es_newobj("Item", item:BuildRaw())
+			c.quality = 20
+			c:BuildModList()
+			return c.weaponData and c.weaponData[1]
+		end)
+		if ok and q20 and q20.PhysicalDPS then
+			r.q20_phys = q20.PhysicalDPS
+			r.q20_total = q20.TotalDPS
+		end
+	end
+	return r
+end
+
 -- Compare an item (PoB/game English item text) against every slot it fits.
 -- nodef: "EnergyShield,Armour" 처럼 끈 고유 방어력 (그 장비 몫을 0 으로)
 function es_compare_item(itemText, nodef)
@@ -2338,12 +2366,13 @@ function es_compare_item(itemText, nodef)
 	end
 	item:BuildModList()
 	local defences = defInfo(item)
+	local weapon = weaponInfo(item)
 	zeroDefs(item, (parseDefs(nodef)))
 	local itemsTab = build.itemsTab
 	itemsTab:UpdateSockets()
 	local calcFunc, calcBase = build.calcsTab:GetMiscCalculator()
 	local res = { name = item.name, base = item.baseName, rarity = item.rarity, base_stats = pickStats(calcBase), slots = { },
-		defences = defences }
+		defences = defences, weapon = weapon }
 	local jewelIndex = { }
 	for i, nodeId in ipairs(sortedJewelSockets()) do jewelIndex[nodeId] = i end
 	if item.type == "Flask" then

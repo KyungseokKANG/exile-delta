@@ -532,6 +532,14 @@ class ItemEditor(QWidget):
         hint.setWordWrap(True)
         v.addWidget(hint)
 
+        # 무기 자체 DPS (무기만): 처음엔 아이템 글로 바로, 계산이 오면 PoB 값으로 (옵션·퀄리티를 바꾸면 따라감)
+        self.wdps = QLabel()
+        self.wdps.setTextFormat(Qt.TextFormat.RichText)
+        self.wdps.setWordWrap(True)
+        self.wdps.setContentsMargins(2, 0, 2, 0)
+        self.wdps.hide()
+        v.addWidget(self.wdps)
+
         # 퀄리티 (무기·방어구만): 바꾸면 바로 다시 계산
         self.q_row = QWidget()
         qh = QHBoxLayout(self.q_row)
@@ -747,6 +755,12 @@ class ItemEditor(QWidget):
         self.oil_btn.setVisible(slot == "Amulet")
         self.orig_label.setText("")
         self.nodef = set()
+        try:
+            import weapon_dps
+
+            self._sync_weapon(weapon_dps.calc("\n".join(model.head + [m.text for m in model.mods] + list(model.flags))))
+        except Exception:  # noqa: BLE001 - 표시용: 못 읽으면 숨김
+            self._sync_weapon(None)
         self._sync_def(None)
         self._sync_quality(reset_orig=True)
         self._rebuild_rows()
@@ -835,6 +849,18 @@ class ItemEditor(QWidget):
         self.q_spin.blockSignals(False)
         self.q_orig.setText(f"원래 {self._q_orig or 0}%")
         self.q_back.setEnabled(q != (self._q_orig or 0))
+
+    def _sync_weapon(self, w: dict | None) -> None:
+        """무기 자체 DPS 줄 (무기가 아니면 숨김)."""
+        if not w:
+            self.wdps.hide()
+            return
+        import weapon_dps
+
+        line, tip = weapon_dps.html_line(w, DIM)
+        self.wdps.setText(line)
+        self.wdps.setToolTip(tip)
+        self.wdps.show()
 
     DEF_KO = {"Armour": "방어도", "Evasion": "회피", "EnergyShield": "에너지 보호막", "Ward": "수호"}
 
@@ -1195,6 +1221,8 @@ class ItemEditor(QWidget):
                 self._last_r = r or {}
                 self.result.setText(Overlay._pob_html(self._with_equip_base(r or {})))
                 self._sync_def((r or {}).get("defences"))
+                if (r or {}).get("weapon"):
+                    self._sync_weapon(dict(r["weapon"], inc_phys=None))
                 self._start_why(tok, r or {})
         except Exception as e:  # noqa: BLE001 — '계산 중' 에 멈춰 있지 않도록
             self.result.setText(f"<span style='color:{COL['X']}'>결과 표시 실패: {html.escape(str(e))}</span>")
